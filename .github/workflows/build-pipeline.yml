@@ -22,9 +22,9 @@ jobs:
           python -m pip install --upgrade pip uv
           uv venv
           uv pip install --upgrade '.[all]'
-      - name: Run package creation
+      - name: Run pre-commit hooks
         run: |
-          pre-commit run --all-files
+          uv run pre-commit run --all-files
       - name: Run Tests
         run: |
-          pytest
+          uv run pytest
