@@ -1,0 +1,170 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jmullan.artificer"
+dynamic = ["version"]
+description = "Manage java and other artifacts"
+authors = [
+  {name = "Jesse Mullan", email = "jmullan@gmail.com"}
+]
+maintainers = [
+  {name = "Jesse Mullan", email = "jmullan@gmail.com"}
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy",
+]
+readme = "README.md"
+requires-python = ">=3.13"
+license = {text = "MIT license"}
+dependencies = [
+
+
+"jmullan.cmd@git+https://github.com/jmullan/jmullan.cmd",
+    "jmullan.logging@git+https://github.com/jmullan/jmullan.logging",
+"jproperties",
+    "requests",
+    "defusedxml"
+]
+
+[project.optional-dependencies]
+all = ["jmullan.artificer[test,dev,build]"]
+test = [
+    "coverage[toml]",
+    "pytest",
+    "pytest-cov",
+    "pytest-mock",
+
+]
+dev = [
+    "pre-commit",
+    "mdformat",
+    "mypy",
+    "ruff",
+]
+build = [
+    "hatch",
+    "pip",
+    "uv"
+]
+
+[project.urls]
+bugs = "https://github.com/jmullan/jmullan.artificer/issues"
+changelog = "https://github.com/jmullan/jmullan.artificer/blob/main/CHANGELOG.md"
+homepage = "https://github.com/jmullan/jmullan.artificer"
+
+# see also:
+# https://hatch.pypa.io/latest/version/
+# https://waylonwalker.com/hatch-version/
+[tool.hatch.version]
+path = "src/jmullan/artificer/__about__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jmullan"]
+sources = ["src"]
+only-include = ["src/jmullan/artificer"]
+
+[tool.hatch.envs.types.scripts]
+check = "mypy --install-types --non-interactive {args:src/jmullan.artificer tests}"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.coverage.run]
+source_pkgs = ["jmullan.artificer", "tests"]
+branch = true
+parallel = true
+omit = [
+  "src/jmullan/artificer/__about__.py",
+]
+
+[tool.coverage.paths]
+jmullan.artificer = ["src/jmullan/artificer"]
+tests = ["tests", "*/jmullan/artificer/tests"]
+
+[tool.coverage.report]
+exclude_lines = [
+  "no cov",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]
+
+[project.scripts]
+poke-sonatype = "jmullan.artificer.poke_sonatype:main"
+
+[tool.mypy]
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "src:tests"
+python_version = "3.13"
+ignore_missing_imports = true
+enable_error_code = [
+    "ignore-without-code"
+]
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.ruff]
+line-length = 120
+lint.select = [
+    "ALL"
+]
+lint.ignore = [
+    "ANN002",  # Missing type annotation for `*args`
+    "ANN003",  # Missing type annotation for `**kwargs`
+    "ANN204", # Missing return type annotation for special method `__init__`
+    "BLE001",  # Do not catch blind exception: `Exception`
+    "COM812",  # missing-trailing-comma
+    "D104", # Missing docstring in public package
+    "D107", # Missing docstring in `__init__`
+    "G004", # logging statement uses f-string
+    "D203",  # `incorrect-blank-line-before-class`
+    "D213",  # `multi-line-summary-second-line`
+    "EM101",  # Exception must not use a string literal, assign to variable first
+    "SIM108",  # Use ternary operator instead of `if`-`else`-block
+    "TRY003",  # Avoid specifying long messages outside the exception class
+]
+
+# Only ignore variables named "_".
+lint.dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?)|args|kwargs)$"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "ANN",     # Missing type annotations
+    "ARG",     # Unused function args -> fixtures nevertheless are functionally relevant...
+    "D",       # Missing docstrings
+    "D103",    # Missing docstring in public function
+    "FBT",     # Don't care about booleans as positional arguments in tests, e.g. via @pytest.mark.parametrize()
+    "PLR2004", # Magic value used in comparison, ...
+    "S101",    # asserts allowed in tests...
+    "S311",    # Standard pseudo-random generators are not suitable for cryptographic purposes
+    "TRY002",  # Create your own exception
+    "TRY301",  # Abstract `raise` to an inner function
+]
+
+[tool.ruff.lint.flake8-annotations]
+# this is supposed to deal with ANN204 for __init__, but doesn't seem to work
+mypy-init-return = true
+
+[tool.ruff.lint.isort]
+known-first-party = ["jmullan.artificer"]
+known-local-folder = ["src"]
+section-order = ["future", "standard-library", "third-party", "internal", "first-party", "local-folder"]
+
+[tool.ruff.lint.isort.sections]
+internal = ["jmullan"]
+
+[tool.ruff.format]
+docstring-code-format = true
+docstring-code-line-length = 80
+quote-style = "double"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "--doctest-modules -p no:logging --import-mode=importlib"
+consider_namespace_packages = true
