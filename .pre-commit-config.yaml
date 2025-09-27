@@ -3,7 +3,7 @@ default_language_version:
 
 repos:
 - repo: https://github.com/pre-commit/pre-commit-hooks
-  rev: 'v5.0.0'
+  rev: 'v6.0.0'
   hooks:
   - id: check-added-large-files
   - id: check-ast
@@ -19,7 +19,7 @@ repos:
   - id: trailing-whitespace
 
 - repo: https://github.com/python-jsonschema/check-jsonschema
-  rev: '0.33.0'
+  rev: '0.34.0'
   hooks:
   - id: check-github-workflows
 
@@ -29,7 +29,7 @@ repos:
   - id: mdformat
 
 - repo: https://github.com/charliermarsh/ruff-pre-commit
-  rev: 'v0.11.12'
+  rev: 'v0.13.2'
   hooks:
   - id: ruff-format
     name: ruff-format
@@ -38,7 +38,7 @@ repos:
     args: ["--fix", "--exit-non-zero-on-fix"]
 
 - repo: https://github.com/pre-commit/mirrors-mypy
-  rev: 'v1.16.0'
+  rev: 'v1.18.2'
   hooks:
   - id: mypy
     name: mypy-src
