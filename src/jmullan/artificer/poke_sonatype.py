@@ -1,5 +1,4 @@
-#!/usr/bin/env python3.13
-"""Rhe main command-line entrypoint."""
+"""The main command-line entrypoint."""
 
 import logging
 import os
