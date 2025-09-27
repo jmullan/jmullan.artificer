@@ -96,6 +96,7 @@ exclude_lines = [
 
 [project.scripts]
 poke-sonatype = "jmullan.artificer.poke_sonatype:main"
+harbor-registry = "jmullan.artificer.harbor_registry:main"
 
 [tool.mypy]
 namespace_packages = true

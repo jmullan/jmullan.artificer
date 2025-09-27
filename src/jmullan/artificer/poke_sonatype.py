@@ -106,41 +106,6 @@ class Main(cmd.Main):
         else:
             easy_logging.easy_initialize_logging()
 
-    def get(self, url: str) -> requests.Response | None:
-        """Get something via HTTP GET or from an in-memory cache."""
-        if url not in self.gets:
-            try:
-                self.gets[url] = requests.get(url, timeout=360)
-                if self.gets[url].status_code >= ERROR_RESPONSE_CODE_THRESHOLD:
-                    logger.warning("GET %s %s", self.gets[url].status_code, url)
-                else:
-                    logger.info("GET %s %s", self.gets[url].status_code, url)
-            except Exception:
-                logger.exception("Error fetching %s", url)
-        return self.gets.get(url)
-
-    def load_properties_into_configs(self, file_path: pathlib.Path) -> None:
-        """Extract properties from a .properties file and load them into dictionaries for later."""
-        try:
-            with file_path.open("rb") as config_file:
-                config = jproperties.Properties()
-                config.load(config_file)
-                self.configs[resolve_path(file_path)] = {}
-                for item in config.items():
-                    self.configs[resolve_path(file_path)][item[0]] = item[1].data
-        except Exception:
-            logger.exception("Oopies")
-
-    def load_pom_xml_into_configs(self, file_path: pathlib.Path) -> None:
-        """Extract properties from a pom file and load them into dictionaries for later."""
-        try:
-            with file_path.open("rb") as config_file:
-                tree = ElementTree.parse(config_file)
-                root = tree.getroot()
-                self.poms[resolve_path(file_path)] = root
-        except Exception:
-            logger.exception("Oopies")
-
     def main(self) -> None:
         """Interact with sonatype nexus."""
         super().main()
@@ -179,6 +144,41 @@ class Main(cmd.Main):
 
         for artifact_version_extension in artifact_version_extensions:
             self.get(artifact_version_extension.sha_url)
+
+    def get(self, url: str) -> requests.Response | None:
+        """Get something via HTTP GET or from an in-memory cache."""
+        if url not in self.gets:
+            try:
+                self.gets[url] = requests.get(url, timeout=360)
+                if self.gets[url].status_code >= ERROR_RESPONSE_CODE_THRESHOLD:
+                    logger.warning("GET %s %s", self.gets[url].status_code, url)
+                else:
+                    logger.info("GET %s %s", self.gets[url].status_code, url)
+            except Exception:
+                logger.exception("Error fetching %s", url)
+        return self.gets.get(url)
+
+    def load_properties_into_configs(self, file_path: pathlib.Path) -> None:
+        """Extract properties from a .properties file and load them into dictionaries for later."""
+        try:
+            with file_path.open("rb") as config_file:
+                config = jproperties.Properties()
+                config.load(config_file)
+                self.configs[resolve_path(file_path)] = {}
+                for item in config.items():
+                    self.configs[resolve_path(file_path)][item[0]] = item[1].data
+        except Exception:
+            logger.exception("Oopies")
+
+    def load_pom_xml_into_configs(self, file_path: pathlib.Path) -> None:
+        """Extract properties from a pom file and load them into dictionaries for later."""
+        try:
+            with file_path.open("rb") as config_file:
+                tree = ElementTree.parse(config_file)
+                root = tree.getroot()
+                self.poms[resolve_path(file_path)] = root
+        except Exception:
+            logger.exception("Oopies")
 
     def build_artifact_version_extensions(
         self, artifact_versions: set[ArtifactVersion]
