@@ -8,10 +8,10 @@ import re
 import subprocess
 import sys
 import tomllib
+from collections import defaultdict
 from typing import Any
 
 import yaml
-from mypy.checkexpr import defaultdict
 from packaging.specifiers import Specifier, SpecifierSet
 from packaging.version import Version
 
