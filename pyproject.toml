@@ -28,7 +28,8 @@ dependencies = [
     "jproperties",
     "requests",
     "defusedxml",
-    "pyyaml"
+    "pyyaml",
+    "packaging",
 ]
 
 [project.optional-dependencies]
