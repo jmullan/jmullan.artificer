@@ -44,4 +44,4 @@ repos:
     name: mypy-src
     files: ^src
     args: ["--config-file", "pyproject.toml"]
-    additional_dependencies: ["types-requests"]
+    additional_dependencies: ["types-requests", "types-PyYAML"]

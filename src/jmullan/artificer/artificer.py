@@ -34,5 +34,16 @@ def validate_not_none(value: Any | None) -> None:  # noqa: ANN401
         src = _get_caller_source(inspect.currentframe())
         if src is None:
             raise ValueError("Got unexpected None")
-        message = f"{src} must not be None"
+        message = f"{src.strip()} must not be None"
+        raise ValueError(message)
+
+
+def validate_is_dict(value: Any | None) -> None:  # noqa: ANN401
+    """Almost the same thing as `assert thing is not None` but free of linter complaints."""
+    validate_not_none(value)
+    if not isinstance(value, dict):
+        src = _get_caller_source(inspect.currentframe())
+        if src is None:
+            raise ValueError(f"{value!r} should be a dict")
+        message = f"{src.strip()} ({value!r}) should be a dict"
         raise ValueError(message)
