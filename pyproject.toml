@@ -44,6 +44,7 @@ dev = [
     "mdformat",
     "mypy",
     "ruff",
+    "types-PyYAML",
 ]
 build = [
     "hatch",
@@ -130,6 +131,7 @@ lint.ignore = [
     "EM101",  # Exception must not use a string literal, assign to variable first
     "SIM108",  # Use ternary operator instead of `if`-`else`-block
     "TRY003",  # Avoid specifying long messages outside the exception class
+    'T201',  # Print statements are ok
 ]
 
 # Only ignore variables named "_".

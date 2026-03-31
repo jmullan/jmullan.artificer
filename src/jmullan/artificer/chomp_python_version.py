@@ -1,15 +1,20 @@
 import logging
-from collections import defaultdict
-from typing import Iterable, Iterator
-
-from jmullan.cmd import cmd
-from packaging.specifiers import SpecifierSet, InvalidSpecifier, Specifier, UnparsedVersion, _coerce_version, \
-    UnparsedVersionVar
-from packaging.version import Version, InvalidVersion
-import pathlib
 import os
+import pathlib
 import re
 import sys
+from collections.abc import Iterable, Iterator
+
+from packaging.specifiers import (
+    InvalidSpecifier,
+    Specifier,
+    SpecifierSet,
+    UnparsedVersionVar,
+    _coerce_version,
+)
+from packaging.version import InvalidVersion, Version
+
+from jmullan.cmd import cmd
 
 logger = logging.getLogger(__name__)
 
@@ -72,10 +77,11 @@ def version_in_specifier(version: str, specifier: SpecifierSet) -> bool:
 
 
 class SpecifierSetOr(SpecifierSet):
-    def __init__(self,
-         specifiers: str | Iterable[Specifier | SpecifierSet] = "",
-         prereleases: bool | None = None,
-     ):
+    def __init__(
+        self,
+        specifiers: str | Iterable[Specifier | SpecifierSet] = "",
+        prereleases: bool | None = None,
+    ):
         if isinstance(specifiers, str):
             specifiers = specifiers.replace("|", ",")
         super().__init__(specifiers, prereleases)
@@ -86,18 +92,14 @@ class SpecifierSetOr(SpecifierSet):
         Note that the ordering of the individual specifiers within the set may not
         match the input string.
 
-        >>> SpecifierSetOr('>=1.0.0,!=2.0.0')
+        >>> SpecifierSetOr(">=1.0.0,!=2.0.0")
         <SpecifierSetOr('!=2.0.0|>=1.0.0')>
-        >>> SpecifierSetOr('>=1.0.0,!=2.0.0', prereleases=False)
+        >>> SpecifierSetOr(">=1.0.0,!=2.0.0", prereleases=False)
         <SpecifierSetOr('!=2.0.0|>=1.0.0', prereleases=False)>
-        >>> SpecifierSetOr('>=1.0.0,!=2.0.0', prereleases=True)
+        >>> SpecifierSetOr(">=1.0.0,!=2.0.0", prereleases=True)
         <SpecifierSetOr('!=2.0.0|>=1.0.0', prereleases=True)>
         """
-        pre = (
-            f", prereleases={self.prereleases!r}"
-            if self._prereleases is not None
-            else ""
-        )
+        pre = f", prereleases={self.prereleases!r}" if self._prereleases is not None else ""
 
         return f"<SpecifierSetOr({str(self)!r}{pre})>"
 
@@ -139,7 +141,11 @@ class SpecifierSetOr(SpecifierSet):
         ['1.3', '1.5a1']
         >>> list(SpecifierSetOr(">=1.2.3", prereleases=True).filter(["1.1"]))
         []
-        >>> list(SpecifierSetOr("==1.2.3|==5.6.7", prereleases=True).filter(["1.2.3", "5.6.7"]))
+        >>> list(
+        ...     SpecifierSetOr("==1.2.3|==5.6.7", prereleases=True).filter(
+        ...         ["1.2.3", "5.6.7"]
+        ...     )
+        ... )
         ['1.2.3', '5.6.7']
 
         An "empty" SpecifierSet will filter items based on the presence of prerelease
@@ -170,11 +176,9 @@ class SpecifierSetOr(SpecifierSet):
 
             iterable = (
                 v
-                for v
-                in iterable
+                for v in iterable
                 if any(
-                    spec.contains(v, prereleases=True if prereleases is None else prereleases)
-                    for spec in self._specs
+                    spec.contains(v, prereleases=True if prereleases is None else prereleases) for spec in self._specs
                 )
             )
 
@@ -189,10 +193,7 @@ class SpecifierSetOr(SpecifierSet):
 
             if prereleases is False:
                 return (
-                    item
-                    for item in iterable
-                    if (version := _coerce_version(item)) is None
-                    or not version.is_prerelease
+                    item for item in iterable if (version := _coerce_version(item)) is None or not version.is_prerelease
                 )
 
         # Finally if prereleases is None, apply PEP 440 logic:
@@ -217,56 +218,58 @@ class SpecifierSetOr(SpecifierSet):
 
         return iter(filtered_items if found_final_release else found_prereleases)
 
+
 def parse_specifier(specifier: str | list[str | None] | None) -> SpecifierSet | None:
-    """
-    >>> parse_specifier(">=2.3")
+    """>>> parse_specifier(">=2.3")
     <SpecifierSet('>=2.3')>
     >>> parse_specifier("2.3")
-    <SpecifierSet('~=2.3')>
+    <SpecifierSet('~=2.3.0')>
     >>> parse_specifier("2.7")
-    <SpecifierSet('~=2.7')>
+    <SpecifierSet('~=2.7.0')>
     >>> parse_specifier("3")
     <SpecifierSet('~=3.0')>
     >>> parse_specifier("py3")
     <SpecifierSet('~=3.0')>
     >>> parse_specifier("py36")
-    <SpecifierSet('~=3.6')>
+    <SpecifierSet('~=3.6.0')>
     >>> parse_specifier("py310")
-    <SpecifierSet('~=3.10')>
+    <SpecifierSet('~=3.10.0')>
     >>> parse_specifier("python3.13")
-    <SpecifierSet('~=3.13')>
+    <SpecifierSet('~=3.13.0')>
     >>> parse_specifier(["python3.13", "py27"])
-    <SpecifierSetOr('~=2.7|~=3.13')>
+    <SpecifierSetOr('~=2.7.0|~=3.13.0')>
     """
     if specifier is None:
         return None
     if isinstance(specifier, list):
         specifiers = [parse_specifier(v) for v in specifier]
+        if len(specifiers) == 1:
+            return SpecifierSet(specifiers[0])
         return SpecifierSetOr(specifiers)
-
-    py_version_lower = specifier.lower()
+    specifier = specifier.strip()
+    py_version_lower = specifier.lower().strip()
     matches = re.match(r"^python([.0-9]+)$", py_version_lower)
     if matches:
         specifier = matches.group(1)
-    matches = re.match(r"^py([0-9]+)$", py_version_lower)
+    matches = re.match(r"^py([.0-9]+)$", py_version_lower)
     if matches:
         specifier = matches.group(1)
     matches = re.match(r"^([0-9])\.([0-9]+)$", specifier)
     if matches:
-        return SpecifierSet(f"~={specifier}")
+        return SpecifierSet(f"~={specifier}.0")
     matches = re.match(r"^([23])$", specifier)
     if matches:
         return SpecifierSet(f"~={matches.group(1)}.0")
     matches = re.search(r"^([23])\.([0-9]+)$", specifier)
     if matches:
-        return SpecifierSet(f"~={specifier}")
+        return SpecifierSet(f"~={specifier}.0")
     matches = re.search(r"^([23])([0-9]+)$", specifier)
     if matches:
-        return SpecifierSet(f"~={matches.group(1)}.{matches.group(2)}")
+        return SpecifierSet(f"~={matches.group(1)}.{matches.group(2)}.0")
     try:
         return SpecifierSet(specifier)
     except InvalidSpecifier:
-        logger.warning("Could not parse %s as a specifier", specifier)
+        logger.debug("Could not parse %s as a specifier", specifier)
         return None
 
 
@@ -281,10 +284,10 @@ def get_matching_version(restriction: str, pick: str | None = None) -> str | Non
         specifier = SpecifierSet(f"=={restriction}")
     for version in sorted(PythonBuilds.likely_versions, reverse=backwards):
         if version in specifier:
-            return f'{version}'
+            return f"{version}"
     for version in sorted(PythonBuilds.possible_versions, reverse=backwards):
         if version in specifier:
-            return f'{version}'
+            return f"{version}"
 
     return None
 
@@ -296,14 +299,12 @@ class Main(cmd.Main):
 
     def __init__(self):
         super().__init__()
-        self.parser.add_argument(
-            "restriction",
-            help="Figure out a version from this string"
-        )
+        self.parser.add_argument("restriction", help="Figure out a version from this string")
         ordering = self.parser.add_mutually_exclusive_group()
-        ordering.add_argument("--max", dest="pick", action="store_const", default="max", const="max", help="Pick Maximum version")
         ordering.add_argument(
-            "--min", dest="pick", action="store_const", const="min", help="Pick Minimum version")
+            "--max", dest="pick", action="store_const", default="max", const="max", help="Pick Maximum version"
+        )
+        ordering.add_argument("--min", dest="pick", action="store_const", const="min", help="Pick Minimum version")
 
     def main(self):
         super().main()

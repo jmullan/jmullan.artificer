@@ -13,9 +13,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 import requests
-from jmullan.artificer.artificer import validate_is_dict, validate_not_none
+
 from jmullan.cmd import cmd
 from jmullan.logging import easy_logging
+
+from jmullan.artificer.artificer import validate_is_dict, validate_not_none
 
 logger = logging.getLogger(__name__)
 
@@ -43,13 +45,14 @@ DEBIAN_VERSION_PREFIXES = {
     "buzz": "1.1.",
 }
 
-def get_terminal_width():
+
+def get_terminal_width() -> int:
     """Return the width of the terminal in characters."""
     try:
         size = shutil.get_terminal_size()
-        return size.columns
     except OSError:
         return 80  # Default to 80 columns if size cannot be determined
+    return size.columns
 
 
 def get_debian_version_name(version_string: str | None) -> str | None:
@@ -64,30 +67,31 @@ def get_debian_version_name(version_string: str | None) -> str | None:
 
 @dataclasses.dataclass
 class Project:
-    """
+    """Information about a project in harbor.
 
     "creation_time": "2022-03-10T06:11:20.158Z",
-      "current_user_role_ids": null,
-      "cve_allowlist": {
-        "creation_time": "0001-01-01T00:00:00.000Z",
-        "items": null,
-        "update_time": "0001-01-01T00:00:00.000Z"
-      },
-      "metadata": {
-        "auto_scan": "true",
-        "enable_content_trust": "false",
-        "prevent_vul": "false",
-        "public": "true",
-        "retention_id": "167",
-        "reuse_sys_cve_allowlist": "true",
-        "severity": "high"
-      },
-      "name": "avejandla-sb-thanos",
-      "owner_id": 1,
-      "project_id": 286,
-      "repo_count": 1,
-      "update_time": "2022-03-10T06:11:20.158Z"
+    "current_user_role_ids": null,
+    "cve_allowlist": {
+      "creation_time": "0001-01-01T00:00:00.000Z",
+      "items": null,
+      "update_time": "0001-01-01T00:00:00.000Z"
+    },
+    "metadata": {
+      "auto_scan": "true",
+      "enable_content_trust": "false",
+      "prevent_vul": "false",
+      "public": "true",
+      "retention_id": "167",
+      "reuse_sys_cve_allowlist": "true",
+      "severity": "high"
+    },
+    "name": "avejandla-sb-thanos",
+    "owner_id": 1,
+    "project_id": 286,
+    "repo_count": 1,
+    "update_time": "2022-03-10T06:11:20.158Z"
     """
+
     current_user_role_ids: Any | None
     cve_allowlist: Any
     metadata: dict[str, str]
@@ -110,6 +114,7 @@ class Repository:
       "pull_count": 1,
       "repository_name": "promviz-api-backend/sb-connect"
     """
+
     project_id: int
     project_name: str
     project_public: bool
@@ -118,7 +123,8 @@ class Repository:
     pull_count: int = 0
 
     @property
-    def short_repo_name(self):
+    def short_repo_name(self) -> str:
+        """Get just the end of the repo name."""
         return self.repository_name.split("/")[1]
 
 
@@ -152,11 +158,13 @@ class Artifact:
         try:
             if build_date is not None:
                 build_datetime = datetime.strptime(build_date, "%Y%m%d-%H%M%S").replace(tzinfo=UTC)
-                return (build_datetime.isoformat(timespec="milliseconds")
-                        .replace("+00:00", "Z") # just Z please
-                        .replace('.000Z', 'Z') # trim off no decimal seconds
-                        .replace('T00:00:00Z', 'Z') # trim off midnight
-                        .replace(':00Z', 'Z')) # or trim off no seconds
+                return (
+                    build_datetime.isoformat(timespec="milliseconds")
+                    .replace("+00:00", "Z")  # just Z please
+                    .replace(".000Z", "Z")  # trim off no decimal seconds
+                    .replace("T00:00:00Z", "Z")  # trim off midnight
+                    .replace(":00Z", "Z")
+                )  # or trim off no seconds
 
         except Exception:  # noqa: S110
             pass
@@ -301,9 +309,7 @@ The value of range and list can be string(enclosed by " or '), integer or time (
 """
 
 
-def print_artifact_url(url: str, artifact: Artifact,
-    *,
-    show_artifact_details: bool=False) -> None:
+def print_artifact_url(url: str, artifact: Artifact, *, show_artifact_details: bool = False) -> None:
     """Print the url and debian information from the artifact.
 
     Note: an artifact can have many urls.
@@ -318,15 +324,23 @@ def print_artifact_url(url: str, artifact: Artifact,
         parts.append(f"({debian_version_name})")
     # put the pieces together and remove Debian if no version info is available
     full_url = " ".join(parts).removesuffix("Debian")
-    print(f"  {full_url}")  # noqa: T201
+    print(f"  {full_url}")
     if show_artifact_details:
         tags = artifact.tags
         if tags:
-            print(textwrap.fill(", ".join(tags), get_terminal_width(), initial_indent="    Tags: ", subsequent_indent="      "))
+            print(
+                textwrap.fill(
+                    ", ".join(tags), get_terminal_width(), initial_indent="    Tags: ", subsequent_indent="      "
+                )
+            )
         labels = artifact.label_schemas
         if labels:
             kvs = [f"{k}={v}" for k, v in artifact.label_schemas.items()]
-            print(textwrap.fill("\n".join(kvs), get_terminal_width(), initial_indent="    Labels: ", subsequent_indent="      "))
+            print(
+                textwrap.fill(
+                    "\n".join(kvs), get_terminal_width(), initial_indent="    Labels: ", subsequent_indent="      "
+                )
+            )
 
 
 def build_artifacts_by_version(artifacts_by_id: dict[str, Artifact]) -> dict[str, Artifact]:
@@ -343,10 +357,7 @@ def build_artifacts_by_version(artifacts_by_id: dict[str, Artifact]) -> dict[str
 
 
 def print_artifact_urls(
-    matchers: list[Matcher],
-    artifacts_by_id: dict[str, Artifact],
-    *,
-    show_artifact_details: bool=False
+    matchers: list[Matcher], artifacts_by_id: dict[str, Artifact], *, show_artifact_details: bool = False
 ) -> None:
     """Output urls for artifacts that match the filters."""
     artifacts_by_version = build_artifacts_by_version(artifacts_by_id)
@@ -398,9 +409,12 @@ class Main(cmd.Main):
             "--limit", dest="limit", required=False, default=None, help="only show this many results"
         )
         self.show_artifact_details = self.parser.add_argument(
-            "--show-artifact-details", dest="show_artifact_details",
+            "--show-artifact-details",
+            dest="show_artifact_details",
             action="store_true",
-            required=False, default=False, help="Also print more artifact detail like tags and labels"
+            required=False,
+            default=False,
+            help="Also print more artifact detail like tags and labels",
         )
 
     def setup(self) -> None:
@@ -422,8 +436,8 @@ class Main(cmd.Main):
         else:
             self.search()
 
-
-    def find_artifacts(self):
+    def find_artifacts(self) -> None:
+        """Look for artifacts in various places."""
         if not self.args.project:
             raise ArgumentError(self.project_action, "Missing project")
         if not self.args.repository:
@@ -477,12 +491,13 @@ class Main(cmd.Main):
             params["q"] = ",".join(query_param)
         response = requests.get(url, params=params, timeout=360)
         data = response.json()
-        if isinstance(data, dict) and 'errors' in data:
+        if isinstance(data, dict) and "errors" in data:
             message = f"Errors fetching from harbor: {data['errors']}"
             raise ValueError(message)
         return [Artifact(self.args.url, self.args.project, self.args.repository, a) for a in data]
 
-    def search(self):
+    def search(self) -> None:
+        """Look in the harbor registry for artifacts."""
         projects, repositories = self.query()
         projects_to_repositories: dict[str, list[Repository]] = {p.name: [] for p in projects or []}
         for repository in repositories:
@@ -494,11 +509,10 @@ class Main(cmd.Main):
             for project_name, project_repos in sorted(projects_to_repositories.items(), key=lambda e: (e[0], e[1])):
                 print(f"  {project_name}")
                 if not project_repos:
-                    print(f"    No repos match.")
+                    print("    No repos match.")
                 else:
                     for repo in sorted(project_repos, key=lambda r: r.repository_name):
                         print(f"    {repo.short_repo_name}")
-
 
     def query(self) -> tuple[list[Project], list[Repository]]:
         """Search for a string."""
@@ -520,13 +534,12 @@ class Main(cmd.Main):
             raise ValueError("No valid queries found")
         response = requests.get(url, params=params, timeout=360)
         data = response.json()
-        if isinstance(data, dict) and 'errors' in data:
+        if isinstance(data, dict) and "errors" in data:
             message = f"Errors fetching from harbor: {data['errors']}"
             raise ValueError(message)
         project_data = data.get("project") or []
         repository_data = data.get("repository") or []
         return [Project(**p) for p in project_data], [Repository(**r) for r in repository_data]
-
 
 
 def main() -> None:
