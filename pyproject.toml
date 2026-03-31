@@ -23,11 +23,9 @@ readme = "README.md"
 requires-python = ">=3.13"
 license = {text = "MIT license"}
 dependencies = [
-
-
-"jmullan.cmd@git+https://github.com/jmullan/jmullan.cmd",
+    "jmullan.cmd@git+https://github.com/jmullan/jmullan.cmd",
     "jmullan.logging@git+https://github.com/jmullan/jmullan.logging",
-"jproperties",
+    "jproperties",
     "requests",
     "defusedxml"
 ]
@@ -97,6 +95,8 @@ exclude_lines = [
 [project.scripts]
 poke-sonatype = "jmullan.artificer.poke_sonatype:main"
 harbor-registry = "jmullan.artificer.harbor_registry:main"
+chomp-python-version = "jmullan.artificer.chomp_python_version:main"
+guess-project-python = "jmullan.artificer.guess_project_python:main"
 
 [tool.mypy]
 namespace_packages = true
@@ -111,6 +111,7 @@ warn_return_any = true
 warn_unused_configs = true
 
 [tool.ruff]
+target-version = "py313"
 line-length = 120
 lint.select = [
     "ALL"
@@ -169,3 +170,9 @@ quote-style = "double"
 minversion = "6.0"
 addopts = "--doctest-modules -p no:logging --import-mode=importlib"
 consider_namespace_packages = true
+
+[tool.black]
+target-version = ["py312", "py313"]
+
+[tool.poetry.dependencies]
+python = ">=3.13,<3.14"
