@@ -1,4 +1,4 @@
-"""Look in harbor registry for current docker image versions."""
+"""Look in various files to guess the desired python version"""
 
 import dataclasses
 import logging
@@ -225,8 +225,16 @@ class Main(cmd.Main):
                         if matches:
                             specifier = parse_specifier(matches.group(1))
                             if specifier:
-                                found_version = FoundVersion(dockerfile, "", specifier, line.strip())
+                                found_version = FoundVersion(dockerfile, "FROM", specifier, line.strip())
                                 found_versions.append(found_version)
+                                continue
+                        matches = re.match(r"FROM.*python[^:]*:([.0-9]+)", line.strip())
+                        if matches:
+                            specifier = parse_specifier(matches.group(1))
+                            if specifier:
+                                found_version = FoundVersion(dockerfile, "FROM", specifier, line.strip())
+                                found_versions.append(found_version)
+                                continue
         possible_versions = extract_versions(found_versions)
         iterable = possible_versions
         specifier_sets = [found_version.specifier_set for found_version in found_versions]

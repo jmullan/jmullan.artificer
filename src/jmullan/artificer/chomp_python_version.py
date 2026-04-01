@@ -236,6 +236,8 @@ def parse_specifier(specifier: str | list[str | None] | None) -> SpecifierSet | 
     <SpecifierSet('~=3.10.0')>
     >>> parse_specifier("python3.13")
     <SpecifierSet('~=3.13.0')>
+    >>> parse_specifier("3.9.13")
+    <SpecifierSet('==3.9.13')>
     >>> parse_specifier(["python3.13", "py27"])
     <SpecifierSetOr('~=2.7.0|~=3.13.0')>
     """
@@ -263,6 +265,9 @@ def parse_specifier(specifier: str | list[str | None] | None) -> SpecifierSet | 
     matches = re.search(r"^([23])\.([0-9]+)$", specifier)
     if matches:
         return SpecifierSet(f"~={specifier}.0")
+    matches = re.search(r"^([23])\.([0-9]+).([0-9]+)$", specifier)
+    if matches:
+        return SpecifierSet(f"=={specifier}")
     matches = re.search(r"^([23])([0-9]+)$", specifier)
     if matches:
         return SpecifierSet(f"~={matches.group(1)}.{matches.group(2)}.0")
