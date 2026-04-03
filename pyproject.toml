@@ -30,6 +30,8 @@ dependencies = [
     "defusedxml",
     "pyyaml",
     "packaging",
+    "pathspec",
+    "google-re2"
 ]
 
 [project.optional-dependencies]

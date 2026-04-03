@@ -11,12 +11,13 @@ import tomllib
 from collections import defaultdict
 from typing import Any
 
+import pathspec
 import yaml
 from packaging.specifiers import Specifier, SpecifierSet
 from packaging.version import Version
 
 from jmullan.cmd import cmd
-from jmullan.logging import easy_logging
+from jmullan.logging import easy_logging, formatters
 
 from jmullan.artificer.chomp_python_version import parse_specifier
 
@@ -146,18 +147,91 @@ def run(*args: str, cwd: pathlib.Path | None = None) -> list[str]:
     return []
 
 
+def rglob(
+    path: pathlib.Path,
+    glob: str,
+    max_depth: int | None = None,
+    git_ignore_spec: pathspec.PathSpec | None = None,
+    limit: int | None = None,
+) -> list[pathlib.Path]:
+    files: list[pathlib.Path] = []
+    if path is None or not path.exists():
+        return files
+    if glob is None or not len(glob):
+        return files
+    if max_depth is None:
+        max_depth = len(glob)
+    if max_depth is None:
+        logger.debug("max_depth set to None, using built-in rglob")
+        return list(path.rglob(glob))
+    has_sep = any(sep in glob for sep in ("/", os.sep))
+
+    root_depth = len(path.parts)
+    logger.debug("max_depth set to %s, using custom rglob", max_depth)
+    for directory_path_string, directory_names, filenames in os.walk(path):
+        dir_path = pathlib.Path(directory_path_string)
+        depth = len(dir_path.parts) - root_depth
+        if depth >= max_depth:
+            # stop descending
+            directory_names[:] = []
+        if git_ignore_spec is not None:
+            for d in list(directory_names):
+                if git_ignore_spec.match_file(d) or git_ignore_spec.match_file(dir_path / d):
+                    directory_names.remove(d)
+        if git_ignore_spec is not None:
+            filenames = [f for f in filenames if not git_ignore_spec.match_file(f)]
+        for filename in filenames:
+            found_path = dir_path / filename
+            if git_ignore_spec is not None and git_ignore_spec.match_file(found_path):
+                continue
+            if has_sep:
+                matched = found_path.match(glob)
+            else:
+                matched = pathlib.Path(filename).match(glob)
+            if matched:
+                files.append(found_path)
+                if limit is not None and len(files) >= limit:
+                    return files
+    return files
+
+
 def find_dockerfiles(in_dir: pathlib.Path) -> set[pathlib.Path]:
     ignored_files = find_ignored_files(in_dir)
-    dockerfiles = [p for p in in_dir.rglob("Dockerfile*") if p.is_file()]
+    if ignored_files is None:
+        # we are not in a git-controlled dir, so limit depth
+        git_ignore_spec = load_global_gitignore()
+        dockerfiles = rglob(in_dir, "Dockerfile*", 4, git_ignore_spec=git_ignore_spec, limit=10)
+        dockerfiles = [p for p in dockerfiles if p.is_file()]
+    else:
+        dockerfiles = [p for p in rglob(in_dir, "Dockerfile*") if p.is_file()]
     found = {p.resolve() for p in dockerfiles}
-    ignored = {p.resolve() for p in ignored_files}
-    return found - ignored
+    if ignored_files is not None:
+        ignored = {p.resolve() for p in ignored_files}
+        return found - ignored
+    return found
 
 
-def find_ignored_files(in_dir: pathlib.Path) -> set[pathlib.Path]:
+def find_ignored_files(in_dir: pathlib.Path) -> set[pathlib.Path] | None:
+    dot_git = find_up(".git")
+    if dot_git is None or not dot_git.is_dir():
+        return None
+
     command = ("git", "ls-files", "--others", "-i", "--exclude-standard")
     files = run(*command, cwd=in_dir)
     return set([in_dir / file_name for file_name in files if file_name is not None])
+
+
+def load_global_gitignore() -> pathspec.PathSpec | None:
+    command = ("git", "config", "--get", "core.excludesfile")
+    file_paths = run(*command)
+    if file_paths is None:
+        return None
+    for file_path in file_paths:
+        git_ignore = pathlib.Path(file_path.strip()).expanduser()
+        if git_ignore.is_file():
+            with git_ignore.open("r", encoding="UTF-8") as fh:
+                return pathspec.PathSpec.from_lines("gitwildmatch", fh)
+    return None
 
 
 class Main(cmd.Main):
@@ -175,7 +249,7 @@ class Main(cmd.Main):
         """Do something after parsing args but before main."""
         super().setup()
         if self.args.verbose:
-            easy_logging.easy_initialize_logging("DEBUG")
+            easy_logging.easy_initialize_logging("DEBUG", formatter=formatters.ConsoleFormatter())
         else:
             easy_logging.easy_initialize_logging("INFO")
 
@@ -200,12 +274,14 @@ class Main(cmd.Main):
                     found_versions.append(found_version)
         pre_commit_yaml_path = find_up(".pre-commit-config.yaml")
         if pre_commit_yaml_path is not None and pre_commit_yaml_path.exists():
+            logger.debug("Found pre-commit config")
             found_version = find_yaml_version(pre_commit_yaml_path, "default_language_version.python")
             if found_version:
                 found_versions.append(found_version)
 
         dot_venv = find_up(".venv")
         if dot_venv is not None and dot_venv.is_file():
+            logger.debug("Found .venv")
             with dot_venv.open("r") as handle:
                 for line in handle:
                     specifier = parse_specifier(line)
@@ -219,6 +295,7 @@ class Main(cmd.Main):
             dockerfiles = find_dockerfiles(pathlib.Path.cwd())
         if dockerfiles:
             for dockerfile in dockerfiles:
+                logger.debug("Found dockerfile %s", dockerfile)
                 with dockerfile.open("r") as handle:
                     for line in handle:
                         matches = re.match(r"FROM.*(python[.0-9]+)", line.strip())
