@@ -44,6 +44,7 @@ def validate_is_dict(value: Any | None) -> None:  # noqa: ANN401
     if not isinstance(value, dict):
         src = _get_caller_source(inspect.currentframe())
         if src is None:
-            raise ValueError(f"{value!r} should be a dict")
+            message = f"{value!r} should be a dict"
+            raise TypeError(message)
         message = f"{src.strip()} ({value!r}) should be a dict"
-        raise ValueError(message)
+        raise TypeError(message)

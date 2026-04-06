@@ -1,8 +1,11 @@
+"""Turn a vague python version string into something concrete."""
+
 import logging
 import os
 import pathlib
 import re
 import sys
+import typing
 from collections.abc import Iterable, Iterator
 
 from packaging.specifiers import (
@@ -20,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_version(version: str | None) -> Version | None:
+    """Turn a version string into a Version object or None if there is an error."""
     if version is None:
         return None
     try:
@@ -30,11 +34,14 @@ def get_version(version: str | None) -> Version | None:
 
 
 class PythonBuilds:
-    possible_versions: set[Version] = set()
-    likely_versions: set[Version] = set()
+    """Holds various python versions that can be matched against."""
+
+    possible_versions: typing.ClassVar[set[Version]] = set()
+    likely_versions: typing.ClassVar[set[Version]] = set()
 
     @classmethod
-    def populate_versions(cls):
+    def populate_versions(cls) -> None:  # noqa: C901
+        """Find python versions in the system or the spec."""
         version_tuple = sys.version_info[:3]
         version_str = f"{version_tuple[0]}.{version_tuple[1]}.{version_tuple[2]}"
         version = get_version(version_str)
@@ -42,7 +49,7 @@ class PythonBuilds:
             cls.possible_versions.add(version)
             cls.likely_versions.add(version)
         roots = [os.environ.get("PYENV_ROOT"), "~/.pyenv", "/usr/share/pyenv"]
-        pyenv_roots = set(x for x in roots if x is not None)
+        pyenv_roots = {x for x in roots if x is not None}
         for root in pyenv_roots:
             path = pathlib.Path(root).expanduser()
             if path.exists():
@@ -53,7 +60,7 @@ class PythonBuilds:
                     if versions:
                         cls.possible_versions.update(versions)
         roots = [os.environ.get("PYENV_ROOT"), "~/.pyenv", "/usr/share/pyenv"]
-        pyenv_roots = set(x for x in roots if x is not None)
+        pyenv_roots = {x for x in roots if x is not None}
         for root in pyenv_roots:
             path = pathlib.Path(root).expanduser()
             if path.exists():
@@ -70,6 +77,7 @@ class PythonBuilds:
 
 
 def version_in_specifier(version: str, specifier: SpecifierSet) -> bool:
+    """Check if the version is contained in the specifier."""
     if version is None or specifier is None:
         return False
     blessed_version = get_version(version)
@@ -77,17 +85,19 @@ def version_in_specifier(version: str, specifier: SpecifierSet) -> bool:
 
 
 class SpecifierSetOr(SpecifierSet):
+    """A Specifier Set that is an OR of the component parts instead of an AND."""
+
     def __init__(
         self,
         specifiers: str | Iterable[Specifier | SpecifierSet] = "",
-        prereleases: bool | None = None,
+        prereleases: bool | None = None,  # noqa: FBT001
     ):
         if isinstance(specifiers, str):
             specifiers = specifiers.replace("|", ",")
         super().__init__(specifiers, prereleases)
 
     def __repr__(self) -> str:
-        """A representation of the specifier set that shows all internal state.
+        """Represent the specifier set showing all internal state.
 
         Note that the ordering of the individual specifiers within the set may not
         match the input string.
@@ -104,7 +114,9 @@ class SpecifierSetOr(SpecifierSet):
         return f"<SpecifierSetOr({str(self)!r}{pre})>"
 
     def __str__(self) -> str:
-        """A string representation of the specifier set that can be round-tripped.
+        """Represent the specifier set.
+
+        Can be round-tripped.
 
         Note that the ordering of the individual specifiers within the set may not
         match the input string.
@@ -117,7 +129,9 @@ class SpecifierSetOr(SpecifierSet):
         return "|".join(sorted(str(s) for s in self._specs))
 
     def filter(
-        self, iterable: Iterable[UnparsedVersionVar], prereleases: bool | None = None
+        self,
+        iterable: Iterable[UnparsedVersionVar],
+        prereleases: bool | None = None,  # noqa: FBT001
     ) -> Iterator[UnparsedVersionVar]:
         """Filter items in the given iterable, that match the specifiers in this set.
 
@@ -219,8 +233,10 @@ class SpecifierSetOr(SpecifierSet):
         return iter(filtered_items if found_final_release else found_prereleases)
 
 
-def parse_specifier(specifier: str | list[str | None] | None) -> SpecifierSet | None:
-    """>>> parse_specifier(">=2.3")
+def parse_specifier(specifier: str | list[str | None] | None) -> SpecifierSet | None:  # noqa: PLR0911 C901
+    """Parse a specifier or specifiers into a SpecifierSet.
+
+    >>> parse_specifier(">=2.3")
     <SpecifierSet('>=2.3')>
     >>> parse_specifier("2.3")
     <SpecifierSet('~=2.3.0')>
@@ -278,29 +294,39 @@ def parse_specifier(specifier: str | list[str | None] | None) -> SpecifierSet | 
         return None
 
 
+def get_matching_versions(restriction: str | Specifier | SpecifierSet, backwards: bool = False) -> list[str]:  # noqa: FBT001 FBT002
+    """Get a list of versions matching a restriction."""
+    if not PythonBuilds.possible_versions:
+        PythonBuilds.populate_versions()
+    if isinstance(restriction, str):
+        try:
+            specifier = SpecifierSet(restriction)
+        except InvalidSpecifier:
+            specifier = SpecifierSet(f"=={restriction}")
+    else:
+        specifier = restriction
+    versions = []
+    for version in sorted(PythonBuilds.likely_versions, reverse=backwards):
+        if version in specifier:
+            versions.append(f"{version}")  # noqa: PERF401
+    for version in sorted(PythonBuilds.possible_versions, reverse=backwards):
+        if version in specifier:
+            versions.append(f"{version}")  # noqa: PERF401
+
+    return versions
+
+
 def get_matching_version(restriction: str, pick: str | None = None) -> str | None:
     """Get the minimum version from a restriction."""
     backwards = pick == "max"
-    if not PythonBuilds.possible_versions:
-        PythonBuilds.populate_versions()
-    try:
-        specifier = SpecifierSet(restriction)
-    except InvalidSpecifier:
-        specifier = SpecifierSet(f"=={restriction}")
-    for version in sorted(PythonBuilds.likely_versions, reverse=backwards):
-        if version in specifier:
-            return f"{version}"
-    for version in sorted(PythonBuilds.possible_versions, reverse=backwards):
-        if version in specifier:
-            return f"{version}"
-
+    matching_versions = get_matching_versions(restriction, backwards)
+    if matching_versions:
+        return matching_versions[0]
     return None
 
 
 class Main(cmd.Main):
-    """Figure out a python version based on restrictions and available python
-    versions.
-    """
+    """Figure out a version based on restrictions and available python versions."""
 
     def __init__(self):
         super().__init__()
@@ -311,24 +337,26 @@ class Main(cmd.Main):
         )
         ordering.add_argument("--min", dest="pick", action="store_const", const="min", help="Pick Minimum version")
 
-    def main(self):
+    def main(self) -> None:
+        """Turn a python version string into a reasonable python version."""
         super().main()
         if self.args.restriction is None:
             self.parser.print_usage()
-            exit(1)
+            sys.exit(1)
 
         restriction = self.args.restriction.strip()
         if not len(restriction):
             self.parser.print_usage()
-            exit(1)
+            sys.exit(1)
         matching_version = get_matching_version(restriction, pick=self.args.pick)
         if matching_version is not None:
             print(matching_version)
-            exit(0)
-        exit(1)
+            sys.exit(0)
+        sys.exit(1)
 
 
-def main():
+def main() -> None:
+    """Turn a python version string into a reasonable python version."""
     Main().main()
 
 

@@ -1,4 +1,4 @@
-"""Look in various files to guess the desired python version"""
+"""Look in various files to guess the desired python version."""
 
 import dataclasses
 import logging
@@ -19,21 +19,25 @@ from packaging.version import Version
 from jmullan.cmd import cmd
 from jmullan.logging import easy_logging, formatters
 
-from jmullan.artificer.chomp_python_version import parse_specifier
+from jmullan.artificer.chomp_python_version import get_matching_versions, parse_specifier
 
 logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
 class FoundVersion:
+    """Data about a python version as found in a file."""
+
     file: pathlib.Path
     selector: str
     specifier_set: SpecifierSet
     original_string: str
 
 
-def deep_get(data: Any, variable: str):
-    """>>> deep_get({"a": {"b": "c"}}, "a.b")
+def deep_get(data: Any, variable: str) -> Any:  # noqa: ANN401
+    """Get a value from a nested dictionary.
+
+    >>> deep_get({"a": {"b": "c"}}, "a.b")
     'c'
     >>> deep_get({"a": {"b": [1, 2, 3]}}, "a.b.0")
     1
@@ -65,31 +69,36 @@ def deep_get(data: Any, variable: str):
     return remaining
 
 
-def toml_var(filename: str | pathlib.Path, variable: str) -> Any:
+def toml_var(filename: str | pathlib.Path, variable: str) -> Any:  # noqa: ANN401
+    """Load a TOML file and find a variable in that file."""
     if filename is None:
         raise ValueError("filename must not be None")
     if isinstance(filename, str):
         return toml_var(pathlib.Path(filename), variable)
     if not filename.exists():
-        raise FileNotFoundError(f"{filename} does not exist")
-    with open(filename, "rb") as f:
+        message = f"{filename} does not exist"
+        raise FileNotFoundError(message)
+    with filename.open("rb") as f:
         data = tomllib.load(f)
         return deep_get(data, variable)
 
 
-def yaml_var(filename: str | pathlib.Path, variable: str) -> Any:
+def yaml_var(filename: str | pathlib.Path, variable: str) -> Any:  # noqa: ANN401
+    """Load a YAML file and find a variable in that file."""
     if filename is None:
         raise ValueError("filename must not be None")
     if isinstance(filename, str):
         return yaml_var(pathlib.Path(filename), variable)
     if not filename.exists():
-        raise FileNotFoundError(f"{filename} does not exist")
-    with open(filename, "rb") as f:
+        message = f"{filename} does not exist"
+        raise FileNotFoundError(message)
+    with filename.open("rb") as f:
         data = yaml.safe_load(f)
         return deep_get(data, variable)
 
 
 def find_up(filename: str | pathlib.Path) -> pathlib.Path | None:
+    """Look for a file in a parent directory."""
     current_dir = pathlib.Path().absolute()
     test_path = current_dir / filename
     if test_path.exists():
@@ -103,6 +112,7 @@ def find_up(filename: str | pathlib.Path) -> pathlib.Path | None:
 
 
 def find_toml_version(path: pathlib.Path, selector: str) -> FoundVersion | None:
+    """Extract a version from a TOML file."""
     value = toml_var(path, selector)
     if value is None:
         return None
@@ -113,6 +123,7 @@ def find_toml_version(path: pathlib.Path, selector: str) -> FoundVersion | None:
 
 
 def find_yaml_version(path: pathlib.Path, selector: str) -> FoundVersion | None:
+    """Extract a version from a YAML file."""
     value = yaml_var(path, selector)
     if value is None:
         return None
@@ -123,41 +134,42 @@ def find_yaml_version(path: pathlib.Path, selector: str) -> FoundVersion | None:
 
 
 def extract_versions(found_versions: list[FoundVersion]) -> set[str]:
+    """Guess what versions would match a set of specifications."""
     if found_versions is None:
         return set()
     versions: set[str] = set()
     for found_version in found_versions:
-        for specifier in found_version.specifier_set._specs:
+        for specifier in found_version.specifier_set:
             if isinstance(specifier, Specifier):
-                canonical_spec = specifier._canonical_spec
-                if canonical_spec:
-                    version = canonical_spec[1]
-                    if versions is not None:
-                        versions.add(version)
+                if specifier.operator == "===":
+                    versions.add(specifier.version)
+                matching_versions = get_matching_versions(str(specifier))
+                if matching_versions is not None:
+                    versions.update(matching_versions)
     return versions
 
 
 def run(*args: str, cwd: pathlib.Path | None = None) -> list[str]:
+    """Run a command and return the output as a list."""
     if (len(args)) == 1 and " " in args[0]:
         return run(*(args[0].split(" ")), cwd=cwd)
     logger.debug("Running %s", " ".join(args))
-    with subprocess.Popen(args, stdout=subprocess.PIPE, cwd=cwd) as proc:
+    with subprocess.Popen(args, stdout=subprocess.PIPE, cwd=cwd) as proc:  # noqa: S603
         if proc.stdout is not None:
             return proc.stdout.read().decode("UTF8").strip().split("\n")
     return []
 
 
-def rglob(
+def rglob(  # noqa: PLR0912 C901
     path: pathlib.Path,
     glob: str,
     max_depth: int | None = None,
     git_ignore_spec: pathspec.PathSpec | None = None,
     limit: int | None = None,
 ) -> list[pathlib.Path]:
+    """Look for files that match the glob but are not excluded."""
     files: list[pathlib.Path] = []
-    if path is None or not path.exists():
-        return files
-    if glob is None or not len(glob):
+    if path is None or not path.exists() or glob is None or not len(glob):
         return files
     if max_depth is None:
         max_depth = len(glob)
@@ -179,7 +191,7 @@ def rglob(
                 if git_ignore_spec.match_file(d) or git_ignore_spec.match_file(dir_path / d):
                     directory_names.remove(d)
         if git_ignore_spec is not None:
-            filenames = [f for f in filenames if not git_ignore_spec.match_file(f)]
+            filenames = [f for f in filenames if not git_ignore_spec.match_file(f)]  # noqa: PLW2901
         for filename in filenames:
             found_path = dir_path / filename
             if git_ignore_spec is not None and git_ignore_spec.match_file(found_path):
@@ -196,6 +208,10 @@ def rglob(
 
 
 def find_dockerfiles(in_dir: pathlib.Path) -> set[pathlib.Path]:
+    """Look for Dockerfiles recursively.
+
+    This can be expensive!
+    """
     ignored_files = find_ignored_files(in_dir)
     if ignored_files is None:
         # we are not in a git-controlled dir, so limit depth
@@ -212,16 +228,18 @@ def find_dockerfiles(in_dir: pathlib.Path) -> set[pathlib.Path]:
 
 
 def find_ignored_files(in_dir: pathlib.Path) -> set[pathlib.Path] | None:
+    """Ask git to tell us what files can be ignored."""
     dot_git = find_up(".git")
     if dot_git is None or not dot_git.is_dir():
         return None
 
     command = ("git", "ls-files", "--others", "-i", "--exclude-standard")
     files = run(*command, cwd=in_dir)
-    return set([in_dir / file_name for file_name in files if file_name is not None])
+    return {in_dir / file_name for file_name in files if file_name is not None}
 
 
 def load_global_gitignore() -> pathspec.PathSpec | None:
+    """Look for a global .gitignore file to find ignorable paths."""
     command = ("git", "config", "--get", "core.excludesfile")
     file_paths = run(*command)
     if file_paths is None:
@@ -232,6 +250,77 @@ def load_global_gitignore() -> pathspec.PathSpec | None:
             with git_ignore.open("r", encoding="UTF-8") as fh:
                 return pathspec.PathSpec.from_lines("gitwildmatch", fh)
     return None
+
+
+def find_pyproject_versions() -> list[FoundVersion]:
+    """Look for versions in pyproject versions."""
+    found_versions: list[FoundVersion] = []
+    pyproject_path = find_up("pyproject.toml")
+    if pyproject_path is not None and pyproject_path.exists():
+        # version ranging
+        pyproject_selectors = [
+            "project.requires-python",
+            "tool.poetry.dependencies.python",
+            "tool.mypy.python_version",
+            "tool.black.target-version",
+            "tool.ruff.target-version",
+        ]
+        for selector in pyproject_selectors:
+            found_version = find_toml_version(pyproject_path, selector)
+            if found_version is not None:
+                found_versions.append(found_version)
+    pre_commit_yaml_path = find_up(".pre-commit-config.yaml")
+    if pre_commit_yaml_path is not None and pre_commit_yaml_path.exists():
+        logger.debug("Found pre-commit config")
+        found_version = find_yaml_version(pre_commit_yaml_path, "default_language_version.python")
+        if found_version:
+            found_versions.append(found_version)
+    return found_versions
+
+
+def find_dot_venv_versions() -> list[FoundVersion]:
+    """Look for python versions in .venv files."""
+    found_versions: list[FoundVersion] = []
+    dot_venv = find_up(".venv")
+    if dot_venv is not None and dot_venv.is_file():
+        logger.debug("Found .venv")
+        with dot_venv.open("r") as handle:
+            for line in handle:
+                specifier = parse_specifier(line)
+                if specifier:
+                    found_version = FoundVersion(dot_venv, ".", specifier, line.strip())
+                    found_versions.append(found_version)
+    return found_versions
+
+
+def find_dockerfile_versions() -> list[FoundVersion]:
+    """Look for python versions in Dockerfiles."""
+    found_versions: list[FoundVersion] = []
+    dot_git = find_up(".git")
+    if dot_git is not None and dot_git.is_dir():
+        dockerfiles = find_dockerfiles(dot_git.parent)
+    else:
+        dockerfiles = find_dockerfiles(pathlib.Path.cwd())
+    if dockerfiles:
+        for dockerfile in dockerfiles:
+            logger.debug("Found dockerfile %s", dockerfile)
+            with dockerfile.open("r") as handle:
+                for line in handle:
+                    matches = re.match(r"FROM.*(python[.0-9]+)", line.strip())
+                    if matches:
+                        specifier = parse_specifier(matches.group(1))
+                        if specifier:
+                            found_version = FoundVersion(dockerfile, "FROM", specifier, line.strip())
+                            found_versions.append(found_version)
+                            continue
+                    matches = re.match(r"FROM.*python[^:]*:([.0-9]+)", line.strip())
+                    if matches:
+                        specifier = parse_specifier(matches.group(1))
+                        if specifier:
+                            found_version = FoundVersion(dockerfile, "FROM", specifier, line.strip())
+                            found_versions.append(found_version)
+                            continue
+    return found_versions
 
 
 class Main(cmd.Main):
@@ -257,65 +346,15 @@ class Main(cmd.Main):
         """Look in harbor registry for docker images."""
         super().main()
 
-        found_versions: list[FoundVersion] = []
-        pyproject_path = find_up("pyproject.toml")
-        if pyproject_path is not None and pyproject_path.exists():
-            # version ranging
-            pyproject_selectors = [
-                "project.requires-python",
-                "tool.poetry.dependencies.python",
-                "tool.mypy.python_version",
-                "tool.black.target-version",
-                "tool.ruff.target-version",
-            ]
-            for selector in pyproject_selectors:
-                found_version = find_toml_version(pyproject_path, selector)
-                if found_version is not None:
-                    found_versions.append(found_version)
-        pre_commit_yaml_path = find_up(".pre-commit-config.yaml")
-        if pre_commit_yaml_path is not None and pre_commit_yaml_path.exists():
-            logger.debug("Found pre-commit config")
-            found_version = find_yaml_version(pre_commit_yaml_path, "default_language_version.python")
-            if found_version:
-                found_versions.append(found_version)
+        found_versions: list[FoundVersion] = find_pyproject_versions()
+        found_versions.extend(find_dot_venv_versions())
+        found_versions.extend(find_dockerfile_versions())
 
-        dot_venv = find_up(".venv")
-        if dot_venv is not None and dot_venv.is_file():
-            logger.debug("Found .venv")
-            with dot_venv.open("r") as handle:
-                for line in handle:
-                    specifier = parse_specifier(line)
-                    if specifier:
-                        found_version = FoundVersion(dot_venv, ".", specifier, line.strip())
-                        found_versions.append(found_version)
-        dot_git = find_up(".git")
-        if dot_git is not None and dot_git.is_dir():
-            dockerfiles = find_dockerfiles(dot_git.parent)
-        else:
-            dockerfiles = find_dockerfiles(pathlib.Path.cwd())
-        if dockerfiles:
-            for dockerfile in dockerfiles:
-                logger.debug("Found dockerfile %s", dockerfile)
-                with dockerfile.open("r") as handle:
-                    for line in handle:
-                        matches = re.match(r"FROM.*(python[.0-9]+)", line.strip())
-                        if matches:
-                            specifier = parse_specifier(matches.group(1))
-                            if specifier:
-                                found_version = FoundVersion(dockerfile, "FROM", specifier, line.strip())
-                                found_versions.append(found_version)
-                                continue
-                        matches = re.match(r"FROM.*python[^:]*:([.0-9]+)", line.strip())
-                        if matches:
-                            specifier = parse_specifier(matches.group(1))
-                            if specifier:
-                                found_version = FoundVersion(dockerfile, "FROM", specifier, line.strip())
-                                found_versions.append(found_version)
-                                continue
         possible_versions = extract_versions(found_versions)
         iterable = possible_versions
-        specifier_sets = [found_version.specifier_set for found_version in found_versions]
-        for specifier_set in specifier_sets:
+
+        for found_version in found_versions:
+            specifier_set = found_version.specifier_set
             logger.debug("Will apply %s", specifier_set)
             for version in possible_versions:
                 logger.debug("%s in %s == %s", version, specifier_set, specifier_set.contains(version))
