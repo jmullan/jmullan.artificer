@@ -293,6 +293,36 @@ def find_dot_venv_versions() -> list[FoundVersion]:
     return found_versions
 
 
+def find_dot_python_version() -> list[FoundVersion]:
+    """Look for python versions in .venv files."""
+    found_versions: list[FoundVersion] = []
+    dot_python_version = find_up(".python-version")
+    if dot_python_version is not None and dot_python_version.is_file():
+        logger.debug("Found .python-version")
+        with dot_python_version.open("r") as handle:
+            for line in handle:
+                specifier = parse_specifier(line)
+                if specifier:
+                    found_version = FoundVersion(dot_python_version, ".", specifier, line.strip())
+                    found_versions.append(found_version)
+    return found_versions
+
+
+def find_runtime_txt_version() -> list[FoundVersion]:
+    """Look for python versions in .venv files."""
+    found_versions: list[FoundVersion] = []
+    runtime_txt_version = find_up("runtime.txt")
+    if runtime_txt_version is not None and runtime_txt_version.is_file():
+        logger.debug("Found runtime.txt")
+        with runtime_txt_version.open("r") as handle:
+            for line in handle:
+                specifier = parse_specifier(line)
+                if specifier:
+                    found_version = FoundVersion(runtime_txt_version, ".", specifier, line.strip())
+                    found_versions.append(found_version)
+    return found_versions
+
+
 def find_dockerfile_versions() -> list[FoundVersion]:
     """Look for python versions in Dockerfiles."""
     found_versions: list[FoundVersion] = []
@@ -349,6 +379,8 @@ class Main(cmd.Main):
         found_versions: list[FoundVersion] = find_pyproject_versions()
         found_versions.extend(find_dot_venv_versions())
         found_versions.extend(find_dockerfile_versions())
+        found_versions.extend(find_dot_python_version())
+        found_versions.extend(find_runtime_txt_version())
 
         possible_versions = extract_versions(found_versions)
         iterable = possible_versions

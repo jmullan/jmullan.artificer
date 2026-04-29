@@ -254,8 +254,12 @@ def parse_specifier(specifier: str | list[str | None] | None) -> SpecifierSet | 
     <SpecifierSet('~=3.13.0')>
     >>> parse_specifier("3.9.13")
     <SpecifierSet('==3.9.13')>
+    >>> parse_specifier("python-3.9.13")
+    <SpecifierSet('==3.9.13')>
     >>> parse_specifier(["python3.13", "py27"])
     <SpecifierSetOr('~=2.7.0|~=3.13.0')>
+    >>> parse_specifier(["Python 3.11.14"])
+    <SpecifierSet('==3.11.14')>
     """
     if specifier is None:
         return None
@@ -266,7 +270,7 @@ def parse_specifier(specifier: str | list[str | None] | None) -> SpecifierSet | 
         return SpecifierSetOr(specifiers)
     specifier = specifier.strip()
     py_version_lower = specifier.lower().strip()
-    matches = re.match(r"^python([.0-9]+)$", py_version_lower)
+    matches = re.match(r"^python[- ]?([.0-9]+)$", py_version_lower)
     if matches:
         specifier = matches.group(1)
     matches = re.match(r"^py([.0-9]+)$", py_version_lower)
