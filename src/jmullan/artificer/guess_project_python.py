@@ -372,10 +372,6 @@ def find_github_action_python_versions() -> list[FoundVersion]:
                         if specifier:
                             found_version = FoundVersion(workflow_yaml, f"Document {index}", specifier, python_version)
                             found_versions.append(found_version)
-
-    for python_version in python_versions:
-        logger.warning("Found python version : %s", python_version)
-
     return found_versions
 
 
