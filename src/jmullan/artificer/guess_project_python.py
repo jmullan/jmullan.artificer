@@ -85,6 +85,15 @@ def toml_var(filename: str | pathlib.Path, variable: str) -> Any:  # noqa: ANN40
 
 def yaml_var(filename: str | pathlib.Path, variable: str) -> Any:  # noqa: ANN401
     """Load a YAML file and find a variable in that file."""
+    values = yaml_vars(filename, variable)
+    if values:
+        return values[0]
+    else:
+        return None
+
+
+def yaml_vars(filename: str | pathlib.Path, variable: str) -> Any:  # noqa: ANN401
+    """Load a YAML file and find a variable in that file."""
     if filename is None:
         raise ValueError("filename must not be None")
     if isinstance(filename, str):
@@ -93,8 +102,12 @@ def yaml_var(filename: str | pathlib.Path, variable: str) -> Any:  # noqa: ANN40
         message = f"{filename} does not exist"
         raise FileNotFoundError(message)
     with filename.open("rb") as f:
-        data = yaml.safe_load(f)
-        return deep_get(data, variable)
+        values = []
+        for document in yaml.safe_load_all(f):
+            value = deep_get(document, variable)
+            if value is not None:
+                values.append(value)
+        return values
 
 
 def find_up(filename: str | pathlib.Path) -> pathlib.Path | None:
@@ -323,6 +336,49 @@ def find_runtime_txt_version() -> list[FoundVersion]:
     return found_versions
 
 
+def rglob_var(document: Any, var_name: str) -> list[Any]:
+    if document is None:
+        return []
+    vars = []
+    if isinstance(document, dict):
+        if var_name in document:
+            return [document[var_name]]
+        for value in document.values():
+            vars.extend(rglob_var(value, var_name))
+    elif isinstance(document, list | tuple | set):
+        for value in document:
+            vars.extend(rglob_var(value, var_name))
+    elif hasattr(document, var_name):
+        return [getattr(document, var_name)]
+    return vars
+
+
+
+def find_github_action_python_versions() -> list[FoundVersion]:
+    """Look for python versions in .venv files."""
+    found_versions: list[FoundVersion] = []
+    dot_github = find_up(".github")
+    python_versions = []
+    if dot_github is not None and dot_github.exists():
+        for workflow_yaml in dot_github.glob("workflows/*.yml"):
+            with workflow_yaml.open("rb") as f:
+                documents = yaml.safe_load_all(f)
+                for index, document in enumerate(documents):
+                    python_versions.extend(rglob_var(document, "python_version"))
+                    python_versions.extend(rglob_var(document, "python-version"))
+                    python_versions.extend(rglob_var(document, "PYTHON_VERSION"))
+                    for python_version in python_versions:
+                        specifier = parse_specifier(python_version)
+                        if specifier:
+                            found_version = FoundVersion(workflow_yaml, f"Document {index}", specifier, python_version)
+                            found_versions.append(found_version)
+
+    for python_version in python_versions:
+        logger.warning("Found python version : %s", python_version)
+
+    return found_versions
+
+
 def find_dockerfile_versions() -> list[FoundVersion]:
     """Look for python versions in Dockerfiles."""
     found_versions: list[FoundVersion] = []
@@ -381,6 +437,7 @@ class Main(cmd.Main):
         found_versions.extend(find_dockerfile_versions())
         found_versions.extend(find_dot_python_version())
         found_versions.extend(find_runtime_txt_version())
+        found_versions.extend(find_github_action_python_versions())
 
         possible_versions = extract_versions(found_versions)
         iterable = possible_versions
