@@ -31,7 +31,8 @@ dependencies = [
     "pyyaml",
     "packaging",
     "pathspec",
-    "google-re2"
+    "google-re2",
+    "lxml"
 ]
 
 [project.optional-dependencies]
@@ -102,6 +103,7 @@ poke-sonatype = "jmullan.artificer.poke_sonatype:main"
 harbor-registry = "jmullan.artificer.harbor_registry:main"
 chomp-python-version = "jmullan.artificer.chomp_python_version:main"
 guess-project-python = "jmullan.artificer.guess_project_python:main"
+guess-project-java = "jmullan.artificer.guess_project_java:main"
 
 [tool.mypy]
 namespace_packages = true

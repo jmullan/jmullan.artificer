@@ -13,4 +13,5 @@ pip install --upgrade pip uv
 uv tool install git@github.com:jmullan/jmullan.artificer.git
 ```
 
-After that, you should have `poke-sonatype` on your path.
+After that, you should have `poke-sonatype`, `harbor-registry`, `chomp-python-version`,
+`guess-project-python`, and `guess-project-java` on your path.
