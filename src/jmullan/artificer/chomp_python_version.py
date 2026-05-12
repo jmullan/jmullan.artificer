@@ -141,7 +141,7 @@ def get_matching_java_versions(restriction: str | Specifier | SpecifierSet) -> l
                 versions.append(version)
     for java_version in JavaVersion:
         if java_version.canonical in specifier:
-            logger.info("Found Java version: %s for %s", java_version, specifier)
+            logger.debug("Found Java version: %s for %s", java_version, specifier)
             versions.append(f"{java_version.canonical}")
     return versions
 
