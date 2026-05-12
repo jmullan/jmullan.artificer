@@ -64,6 +64,7 @@ class JavaVersion(enum.Enum):
     JAVA_24 = (("24", "24.0"), 68)
     JAVA_25 = (("25", "25.0"), 69)
     JAVA_26 = (("26", "26.0"), 70)
+    JAVA_27 = (("27", "27.0"), 71)
 
     def __init__(
         self,
@@ -83,6 +84,13 @@ class JavaVersion(enum.Enum):
             if "." in alias:
                 return alias
         return self.canonical
+
+    @property
+    def next_major_minor(self) -> str:
+        for value in self.__class__:
+            if value.class_major > self.class_major:
+                return value.major_minor
+        return "28.0"
 
     @property
     def specifier(self):
@@ -117,8 +125,6 @@ class SDKManVersion(Version):
 
 def get_matching_java_versions(restriction: str | Specifier | SpecifierSet) -> list[str]:
     """Get a list of versions matching a restriction."""
-    if not PythonBuilds.possible_versions:
-        PythonBuilds.populate_versions()
     if isinstance(restriction, str):
         try:
             specifier = SpecifierSet(restriction)
@@ -135,7 +141,8 @@ def get_matching_java_versions(restriction: str | Specifier | SpecifierSet) -> l
                 versions.append(version)
     for java_version in JavaVersion:
         if java_version.canonical in specifier:
-            versions.append(f"{java_version.canonical}")  # noqa: PERF401
+            logger.info("Found Java version: %s for %s", java_version, specifier)
+            versions.append(f"{java_version.canonical}")
     return versions
 
 

@@ -18,6 +18,7 @@ from jmullan.logging import easy_logging, formatters
 from jmullan.artificer import utils
 from jmullan.artificer.chomp_python_version import (
     FoundVersion,
+    JavaVersion,
     SDKManVersion,
     get_matching_java_versions,
     parse_java_specifier,
@@ -77,9 +78,10 @@ def extract_java_versions(found_versions: list[FoundVersion]) -> set[str]:
             if isinstance(specifier, Specifier):
                 if specifier.operator == "===":
                     versions.add(specifier.version)
-                matching_versions = get_matching_java_versions(str(specifier))
-                if matching_versions is not None:
-                    versions.update(matching_versions)
+
+        matching_versions = get_matching_java_versions(found_version.specifier_set)
+        if matching_versions is not None:
+            versions.update(matching_versions)
     return versions
 
 
@@ -134,6 +136,29 @@ def find_maven_versions() -> list[FoundVersion]:
     return found_versions
 
 
+gradle_support = {
+    JavaVersion.JAVA_8: SpecifierSet(">=2.0,<=8.15"),
+    JavaVersion.JAVA_9: SpecifierSet(">=4.3,<=8.15"),
+    JavaVersion.JAVA_10: SpecifierSet(">=4.7,<=8.15"),
+    JavaVersion.JAVA_11: SpecifierSet(">=5.0,<=8.15"),
+    JavaVersion.JAVA_12: SpecifierSet(">=5.4,<=8.15"),
+    JavaVersion.JAVA_13: SpecifierSet(">=6.0,<=8.15"),
+    JavaVersion.JAVA_14: SpecifierSet(">=6.3,<=8.15"),
+    JavaVersion.JAVA_15: SpecifierSet(">=6.7,<=8.15"),
+    JavaVersion.JAVA_16: SpecifierSet(">=7.0,<=8.15"),
+    JavaVersion.JAVA_17: SpecifierSet(">=7.3"),
+    JavaVersion.JAVA_18: SpecifierSet(">=7.5"),
+    JavaVersion.JAVA_19: SpecifierSet(">=7.6"),
+    JavaVersion.JAVA_20: SpecifierSet(">=8.3"),
+    JavaVersion.JAVA_21: SpecifierSet(">=8.5"),
+    JavaVersion.JAVA_22: SpecifierSet(">=8.8"),
+    JavaVersion.JAVA_23: SpecifierSet(">=8.10"),
+    JavaVersion.JAVA_24: SpecifierSet(">=8.14"),
+    JavaVersion.JAVA_25: SpecifierSet(">=9.1.0"),
+    JavaVersion.JAVA_26: SpecifierSet(">=9.4.0"),
+}
+
+
 def find_gradle_versions() -> list[FoundVersion]:
     """Look for versions in Gradle files."""
     logger.debug("Finding gradle versions...")
@@ -146,6 +171,35 @@ def find_gradle_versions() -> list[FoundVersion]:
                 found_version = FoundVersion(build_gradle.file_path, "FROM", specifier, line.strip())
                 found_versions.append(found_version)
                 continue
+    for gradle_properties in utils.rglob_from_dir_containing(".git", "gradle/wrapper/gradle-wrapper.properties"):
+        for line in gradle_properties.handle:
+            line = re.sub("#.*", "", line).strip()
+            if not len(line) or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            if key == "distributionUrl":
+                # https\://services.gradle.org/distributions/gradle-5.4.1-all.zip
+                gradle_zip_file = os.path.basename(value)
+                matches = re.search(r"gradle-(?P<version>[^-]+)-", gradle_zip_file)
+                if matches:
+                    version = matches.group("version")
+                    min_java_version = None
+                    max_java_version = None
+                    for java_version, gradle_specifier in gradle_support.items():
+                        if version in gradle_specifier:
+                            if min_java_version is None:
+                                min_java_version = java_version
+                            max_java_version = java_version
+                    if min_java_version is not None:
+                        if max_java_version is None:
+                            max_java_version = JavaVersion.JAVA_26
+                        version_range = f">={min_java_version.major_minor},<={max_java_version.next_major_minor}"
+                        logger.debug("gradle wrapper version %s -> %s", version, version_range)
+                        gradle_based_specifier = SpecifierSet(version_range)
+                        found_version = FoundVersion(
+                            gradle_properties.file_path, ".", gradle_based_specifier, line.strip()
+                        )
+                        found_versions.append(found_version)
     return found_versions
 
 
@@ -502,7 +556,6 @@ class Main(cmd.Main):
         for specifier_found_versions in found_versions_by_specifier.values():
             found_version = specifier_found_versions[0]
             specifier_set = found_version.specifier_set
-            logger.debug("Will apply %s", specifier_set)
             for version in possible_versions:
                 logger.debug(
                     "%s in %s == %s",
