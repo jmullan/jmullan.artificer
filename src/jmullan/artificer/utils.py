@@ -1,3 +1,5 @@
+"""Utility functions for various artificer needs."""
+
 import dataclasses
 import io
 import logging
@@ -16,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class GlobbedFile:
+    """Represents a file and how it was found."""
+
     glob: str
     file_path: pathlib.Path
     handle: io.TextIOWrapper
@@ -28,6 +32,7 @@ def rglob_from_dir_containing(
     git_ignore_spec: pathspec.PathSpec | None = None,
     limit: int | None = None,
 ) -> typing.Generator[GlobbedFile, typing.Any]:
+    """Find a file in a directory containing a file."""
     signpost = find_up(signpost_path)
 
     if signpost is not None and signpost.exists() and signpost.parent.is_dir():
@@ -96,7 +101,7 @@ def find_ignored_files(in_dir: pathlib.Path) -> set[pathlib.Path] | None:
     return {in_dir / file_name for file_name in files if file_name is not None}
 
 
-def toml_var(filename: str | pathlib.Path, variable: str) -> typing.Any:  # noqa: ANN401
+def toml_var(filename: str | pathlib.Path, variable: str) -> typing.Any:
     """Load a TOML file and find a variable in that file."""
     if filename is None:
         raise ValueError("filename must not be None")
@@ -110,7 +115,7 @@ def toml_var(filename: str | pathlib.Path, variable: str) -> typing.Any:  # noqa
         return deep_get(data, variable)
 
 
-def yaml_var(filename: str | pathlib.Path, variable: str) -> typing.Any:  # noqa: ANN401
+def yaml_var(filename: str | pathlib.Path, variable: str) -> typing.Any:
     """Load a YAML file and find a variable in that file."""
     values = yaml_vars(filename, variable)
     if values:
@@ -136,7 +141,7 @@ def yaml_vars(filename: str | pathlib.Path, variable: str) -> list[typing.Any]:
         return values
 
 
-def deep_get(data: typing.Any, variable: str) -> typing.Any:  # noqa: ANN401
+def deep_get(data: typing.Any, variable: str) -> typing.Any:
     """Get a value from a nested dictionary.
 
     >>> deep_get({"a": {"b": "c"}}, "a.b")
@@ -186,6 +191,7 @@ def find_up(filename: str | pathlib.Path) -> pathlib.Path | None:
 
 
 def rglob_var(document: typing.Any, var_name: str) -> list[typing.Any]:
+    """Find a variable in a data structure."""
     if document is None:
         return []
     variables = []

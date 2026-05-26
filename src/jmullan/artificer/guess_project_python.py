@@ -1,12 +1,9 @@
 """Look in various files to guess the desired python version."""
 
 import logging
-import os
 import pathlib
 import re
 import sys
-from collections import defaultdict
-from typing import Any
 
 import yaml
 from packaging.specifiers import Specifier
@@ -18,6 +15,7 @@ from jmullan.logging import easy_logging, formatters
 from jmullan.artificer import utils
 from jmullan.artificer.chomp_python_version import (
     FoundVersion,
+    dump_versions,
     find_python_toml_version,
     get_matching_python_versions,
     parse_python_specifier,
@@ -124,23 +122,6 @@ def find_runtime_txt_version() -> list[FoundVersion]:
     return found_versions
 
 
-def rglob_var(document: Any, var_name: str) -> list[Any]:
-    if document is None:
-        return []
-    var_names = []
-    if isinstance(document, dict):
-        if var_name in document:
-            return [document[var_name]]
-        for value in document.values():
-            var_names.extend(rglob_var(value, var_name))
-    elif isinstance(document, list | tuple | set):
-        for value in document:
-            var_names.extend(rglob_var(value, var_name))
-    elif hasattr(document, var_name):
-        return [getattr(document, var_name)]
-    return var_names
-
-
 def find_github_action_python_versions() -> list[FoundVersion]:
     """Look for python versions in .venv files."""
     found_versions: list[FoundVersion] = []
@@ -151,9 +132,9 @@ def find_github_action_python_versions() -> list[FoundVersion]:
             with workflow_yaml.open("rb") as f:
                 documents = yaml.safe_load_all(f)
                 for index, document in enumerate(documents):
-                    python_versions.extend(rglob_var(document, "python_version"))
-                    python_versions.extend(rglob_var(document, "python-version"))
-                    python_versions.extend(rglob_var(document, "PYTHON_VERSION"))
+                    python_versions.extend(utils.rglob_var(document, "python_version"))
+                    python_versions.extend(utils.rglob_var(document, "python-version"))
+                    python_versions.extend(utils.rglob_var(document, "PYTHON_VERSION"))
                     for python_version in python_versions:
                         specifier = parse_python_specifier(python_version)
                         if specifier:
@@ -248,25 +229,6 @@ class Main(cmd.Main):
                 print(sorted_versions[0])
         if self.args.verbose:
             dump_versions(found_versions)
-
-
-def dump_versions(found_versions: list[FoundVersion]) -> None:
-    """Print where we found the versions."""
-    if not found_versions:
-        logger.debug("No specifiers found")
-        return
-    restrictions: dict[str, list[FoundVersion]] = defaultdict(list)
-    for found_version in found_versions:
-        restrictions[f"{found_version.specifier_set}"].append(found_version)
-    for specifier_set, found in restrictions.items():
-        logger.info(specifier_set)
-        for found_version in found:
-            logger.info(
-                "    %s %s %r",
-                pathlib.Path(os.path.relpath(found_version.file, pathlib.Path.cwd())),
-                found_version.selector,
-                found_version.original_string,
-            )
 
 
 def main() -> None:

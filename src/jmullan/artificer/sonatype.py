@@ -222,7 +222,7 @@ def find_poms() -> Generator[Path, Any]:
     """Find any pom.xml files anywhere in the file tree."""
     for root, _, files in os.walk("./", topdown=True):
         for filename in files:
-            if filename in ["pom.xml"]:
+            if filename == "pom.xml":
                 yield pathlib.Path(root, filename)
 
 
@@ -270,7 +270,7 @@ def read_includes_from_include_line(line: str) -> list[str]:
     return includes
 
 
-def force_a_list(value: typing.Any) -> list[typing.Any]:  # noqa: ANN401 PLR0911
+def force_a_list(value: typing.Any) -> list[typing.Any]:  # noqa: PLR0911
     """Change practically any value into a list."""
     match value:
         case list(x):
@@ -295,7 +295,7 @@ def force_a_list(value: typing.Any) -> list[typing.Any]:  # noqa: ANN401 PLR0911
             raise TypeError("Cannot turn a value of an unknown type into a list")
 
 
-def load_json_or_python(value: str | None) -> typing.Any | None:  # noqa: ANN401
+def load_json_or_python(value: str | None) -> typing.Any | None:
     """Make a string in a string into a not-string."""
     if value is None:
         return None

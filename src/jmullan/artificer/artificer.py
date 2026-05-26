@@ -28,7 +28,7 @@ def _get_caller_source(frame: types.FrameType | None) -> str | None:
     return src
 
 
-def validate_not_none(value: Any | None) -> None:  # noqa: ANN401
+def validate_not_none(value: Any | None) -> None:
     """Almost the same thing as `assert thing is not None` but free of linter complaints."""
     if value is None:
         src = _get_caller_source(inspect.currentframe())
@@ -38,7 +38,7 @@ def validate_not_none(value: Any | None) -> None:  # noqa: ANN401
         raise ValueError(message)
 
 
-def validate_is_dict(value: Any | None) -> None:  # noqa: ANN401
+def validate_is_dict(value: Any | None) -> None:
     """Almost the same thing as `assert thing is not None` but free of linter complaints."""
     validate_not_none(value)
     if not isinstance(value, dict):

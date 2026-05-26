@@ -137,7 +137,8 @@ lint.ignore = [
     "EM101",  # Exception must not use a string literal, assign to variable first
     "SIM108",  # Use ternary operator instead of `if`-`else`-block
     "TRY003",  # Avoid specifying long messages outside the exception class
-    'T201',  # Print statements are ok
+    'T201',  # Print statements are ok,
+    'ANN401', # Dynamically typed expressions (typing.Any) are disallowed in `document`
 ]
 
 # Only ignore variables named "_".

@@ -7,6 +7,7 @@ import re
 import sys
 import typing
 from collections import defaultdict
+from typing import Any
 
 import yaml
 from lxml import etree
@@ -20,6 +21,7 @@ from jmullan.artificer.chomp_python_version import (
     FoundVersion,
     JavaVersion,
     SDKManVersion,
+    dump_versions,
     get_matching_java_versions,
     parse_java_specifier,
     specifier_set_contains_java_version,
@@ -475,6 +477,7 @@ def find_build_sbt_versions() -> list[FoundVersion]:
 
 
 def find_sdkman_rc_specifier(prefix: str) -> FoundVersion | None:
+    """Look for an .sdkmanrc file and extract a version from it."""
     sdkman_rc_path = utils.find_up(".sdkmanrc")
     if sdkman_rc_path is not None:
         with sdkman_rc_path.open("r") as handle:
@@ -489,6 +492,43 @@ def find_sdkman_rc_specifier(prefix: str) -> FoundVersion | None:
                         return FoundVersion(sdkman_rc_path, value, specifier, line)
                     logger.warning("Could not parse sdkman java version: %s", value)
     return None
+
+
+def validate_sdkman_version(
+    found_specifiers: list[FoundVersion], return_code: int, sdkman_rc_specifier: FoundVersion
+) -> int:
+    """Check that the .sdkmanrc version matches the given filters."""
+    sdk_man_version = SDKManVersion(sdkman_rc_specifier.selector)
+    for found_version in found_specifiers:
+        if sdk_man_version not in found_version.specifier_set:
+            logger.error(
+                "%s sdk man version %s does not match %s",
+                pathlib.Path.cwd(),
+                sdk_man_version.version,
+                found_version.specifier_set,
+            )
+            return_code = 1
+    return return_code
+
+
+def filter_possible_versions(
+    found_versions_by_specifier: dict[str, list[FoundVersion]], possible_versions: set[str]
+) -> list[Any]:
+    """Produce a list of versions."""
+    iterable = possible_versions
+
+    for specifier_found_versions in found_versions_by_specifier.values():
+        found_version = specifier_found_versions[0]
+        specifier_set = found_version.specifier_set
+        for version in possible_versions:
+            logger.debug(
+                "%s in %s == %s",
+                version,
+                specifier_set,
+                specifier_set_contains_java_version(specifier_set, version),
+            )
+        iterable = specifier_set.filter(iterable, key=SDKManVersion)
+    return list(iterable)
 
 
 class Main(cmd.Main):
@@ -534,37 +574,15 @@ class Main(cmd.Main):
         sdkman_rc_specifier = find_sdkman_rc_specifier("java")
         if sdkman_rc_specifier:
             if self.args.check_sdkman:
-                sdk_man_version = SDKManVersion(sdkman_rc_specifier.selector)
-                for found_version in found_specifiers:
-                    if sdk_man_version not in found_version.specifier_set:
-                        logger.error(
-                            "%s sdk man version %s does not match %s",
-                            pathlib.Path.cwd(),
-                            sdk_man_version.version,
-                            found_version.specifier_set,
-                        )
-                        return_code = 1
+                return_code = validate_sdkman_version(found_specifiers, return_code, sdkman_rc_specifier)
             found_specifiers.append(sdkman_rc_specifier)
 
-        found_versions_by_specifier = defaultdict(list)
+        found_versions_by_specifier: dict[str, list[FoundVersion]] = defaultdict(list)
         for found_version in found_specifiers:
             found_versions_by_specifier[f"{found_version.specifier_set}"].append(found_version)
 
         possible_versions = extract_java_versions(found_specifiers)
-        iterable = possible_versions
-
-        for specifier_found_versions in found_versions_by_specifier.values():
-            found_version = specifier_found_versions[0]
-            specifier_set = found_version.specifier_set
-            for version in possible_versions:
-                logger.debug(
-                    "%s in %s == %s",
-                    version,
-                    specifier_set,
-                    specifier_set_contains_java_version(specifier_set, version),
-                )
-            iterable = specifier_set.filter(iterable, key=SDKManVersion)
-        filtered = list(iterable)
+        filtered = filter_possible_versions(found_versions_by_specifier, possible_versions)
         if not filtered:
             logger.warning("No versions found from %s", possible_versions)
             dump_versions(found_specifiers)
@@ -588,25 +606,6 @@ class Main(cmd.Main):
             else:
                 print(chosen)
         sys.exit(return_code)
-
-
-def dump_versions(found_versions: list[FoundVersion]) -> None:
-    """Print where we found the versions."""
-    if not found_versions:
-        logger.debug("No specifiers found")
-        return
-    restrictions: dict[str, list[FoundVersion]] = defaultdict(list)
-    for found_version in found_versions:
-        restrictions[f"{found_version.specifier_set}"].append(found_version)
-    for specifier_set, found in restrictions.items():
-        logger.info(specifier_set)
-        for found_version in found:
-            logger.info(
-                "    %s %s %r",
-                pathlib.Path(os.path.relpath(found_version.file, pathlib.Path.cwd())),
-                found_version.selector,
-                found_version.original_string,
-            )
 
 
 def main() -> None:
