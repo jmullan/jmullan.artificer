@@ -1,6 +1,5 @@
 """Turn a vague python version string into something concrete."""
 
-import dataclasses
 import enum
 import logging
 import os
@@ -27,14 +26,58 @@ from jmullan.artificer import utils
 logger = logging.getLogger(__name__)
 
 
-@dataclasses.dataclass
-class FoundVersion:
-    """Data about a python version as found in a file."""
+class PythonVersion(enum.Enum):
+    PYTHON_2_7 = ("2.7", 4)
+    PYTHON_3_5 = ("3.5", 5)
+    PYTHON_3_6 = ("3.6", 6)
+    PYTHON_3_7 = ("3.7", 7)
+    PYTHON_3_8 = ("3.8", 8)
+    PYTHON_3_9 = ("3.9", 9)
+    PYTHON_3_10 = ("3.10", 10)
+    PYTHON_3_11 = ("3.11", 11)
+    PYTHON_3_12 = ("3.12", 12)
+    PYTHON_3_13 = ("3.13", 13)
+    PYTHON_3_14 = ("3.14", 14)
+    PYTHON_3_15 = ("3.15", 15)
 
-    file: pathlib.Path
-    selector: str
-    specifier_set: SpecifierSet
-    original_string: str
+    def __init__(
+        self,
+        version_name: str,
+        class_major: int,
+    ) -> None:
+        self.version_name = version_name
+        self.class_major = class_major
+
+    @property
+    def major_minor_patch(self):
+        parts = self.version_name.split(".")
+        while len(parts) < 3:
+            parts.append("0")
+        return ".".join(parts)
+
+    @property
+    def specifier(self):
+        return f"~={self.major_minor_patch}"
+
+    @classmethod
+    def from_version(cls, value: str) -> "PythonVersion | None":
+        normalized = value.strip()
+
+        for version in cls:
+            if normalized == version.version_name:
+                return version
+        return None
+
+    @property
+    def next_version(self) -> "PythonVersion | None":
+        for value in self.__class__:
+            if value.class_major > self.class_major:
+                return value
+        return None
+
+    @property
+    def version(self) -> Version:
+        return Version(self.version_name)
 
 
 class JavaVersion(enum.Enum):
@@ -46,20 +89,20 @@ class JavaVersion(enum.Enum):
     JAVA_5 = (("5", "5", "5.0", "1.5"), 49)
     JAVA_6 = (("6", "6", "6.0", "1.6"), 50)
     JAVA_7 = (("7", "7", "7.0", "1.7"), 51)
-    JAVA_8 = (("8", "8", "8.0", "1.8"), 52)
+    JAVA_8 = (("8", "8", "8.0", "1.8"), 52, "~=8.0")
     JAVA_9 = (("9", "9.0"), 53)
     JAVA_10 = (("10", "10.0"), 54)
-    JAVA_11 = (("11", "11.0", "1.11"), 55)
+    JAVA_11 = (("11", "11.0", "1.11"), 55, "~=11.0")
     JAVA_12 = (("12", "12.0"), 56)
     JAVA_13 = (("13", "13.0"), 57)
     JAVA_14 = (("14", "14.0"), 58)
     JAVA_15 = (("15", "15.0"), 59)
     JAVA_16 = (("16", "16.0"), 60)
-    JAVA_17 = (("17", "17.0"), 61)
+    JAVA_17 = (("17", "17.0"), 61, "~=17.0")
     JAVA_18 = (("18", "18.0"), 62)
     JAVA_19 = (("19", "19.0"), 63)
     JAVA_20 = (("20", "20.0"), 64)
-    JAVA_21 = (("21", "21.0"), 65)
+    JAVA_21 = (("21", "21.0"), 65, "~=21.0")
     JAVA_22 = (("22", "22.0"), 66)
     JAVA_23 = (("23", "23.0"), 67)
     JAVA_24 = (("24", "24.0"), 68)
@@ -71,9 +114,11 @@ class JavaVersion(enum.Enum):
         self,
         aliases: tuple[str, ...],
         class_major: int,
+        specifier: str | None = None,
     ) -> None:
         self.aliases = aliases
         self.class_major = class_major
+        self._specifier = specifier
 
     @property
     def canonical(self) -> str:
@@ -95,6 +140,8 @@ class JavaVersion(enum.Enum):
 
     @property
     def specifier(self):
+        if self._specifier is not None:
+            return self._specifier
         canonical = self.aliases[0]
         parts = canonical.split(".")
         while len(parts) < 3:
@@ -439,30 +486,55 @@ def maybe_specifier_set(
     return None
 
 
-def parse_java_specifier(specifier: str | list[str | None] | None) -> SpecifierSet | None:  # noqa: PLR0911 C901
+def parse_java_specifier(specifier: str | list[str | None] | None, strict: bool = False) -> SpecifierSet | None:  # noqa: PLR0911 C901
     """Parse a specifier or specifiers into a SpecifierSet.
-    >>> parse_java_specifier("11.0-stretch-yy0.0.1")
-    <SpecifierSet('~=11.0.0')>
-    >>> parse_java_specifier("21.0.8-tem")
+
+    >>> parse_java_specifier("11.0-stretch-yy0.0.1", strict=True)
+    <SpecifierSet('~=11.0')>
+    >>> parse_java_specifier("21.0.8-tem", strict=True)
     <SpecifierSet('==21.0.8+tem')>
-    >>> parse_java_specifier("17.0.4.1+1")
+    >>> parse_java_specifier("17.0.4.1+1", strict=True)
     <SpecifierSet('==17.0.4.1+1')>
-    >>> parse_java_specifier("1.7.0_60")
+    >>> parse_java_specifier("1.7.0_60", strict=True)
     <SpecifierSet('==7.0.60')>
-    >>> parse_java_specifier("JDK 7 Update 60")
+    >>> parse_java_specifier("JDK 7 Update 60", strict=True)
     <SpecifierSet('==7.0.60')>
-    >>> parse_java_specifier("21")
-    <SpecifierSet('~=21.0.0')>
-    >>> parse_java_specifier("11.0.1")
+    >>> parse_java_specifier("21", strict=True)
+    <SpecifierSet('~=21.0')>
+    >>> parse_java_specifier("11.0.1", strict=True)
     <SpecifierSet('==11.0.1')>
-    >>> parse_java_specifier("JDK 7u60")
+    >>> parse_java_specifier("JDK 7u60", strict=True)
     <SpecifierSet('==7.0.60')>
-    >>> parse_java_specifier("1.11")
-    <SpecifierSet('~=11.0.0')>
-    >>> parse_java_specifier("JavaVersion.VERSION_1_8")
-    <SpecifierSet('~=8.0.0')>
-    >>> parse_java_specifier("JavaVersion.VERSION_11")
-    <SpecifierSet('~=11.0.0')>
+    >>> parse_java_specifier("1.11", strict=True)
+    <SpecifierSet('~=11.0')>
+    >>> parse_java_specifier("JavaVersion.VERSION_1_8", strict=True)
+    <SpecifierSet('~=8.0')>
+    >>> parse_java_specifier("JavaVersion.VERSION_11", strict=True)
+    <SpecifierSet('~=11.0')>
+
+    >>> parse_java_specifier("11.0-stretch-yy0.0.1", strict=False)
+    <SpecifierSet('~=11.0')>
+    >>> parse_java_specifier("21.0.8-tem", strict=False)
+    <SpecifierSet('~=21.0')>
+    >>> parse_java_specifier("17.0.4.1+1", strict=False)
+    <SpecifierSet('~=17.0')>
+    >>> parse_java_specifier("1.7.0_60", strict=False)
+    <SpecifierSet('~=7.0.0')>
+    >>> parse_java_specifier("JDK 7 Update 60", strict=False)
+    <SpecifierSet('~=7.0')>
+    >>> parse_java_specifier("21", strict=False)
+    <SpecifierSet('~=21.0')>
+    >>> parse_java_specifier("11.0.1", strict=False)
+    <SpecifierSet('~=11.0')>
+    >>> parse_java_specifier("JDK 7u60", strict=False)
+    <SpecifierSet('~=7.0')>
+    >>> parse_java_specifier("1.11", strict=False)
+    <SpecifierSet('~=11.0')>
+    >>> parse_java_specifier("JavaVersion.VERSION_1_8", strict=False)
+    <SpecifierSet('~=8.0')>
+    >>> parse_java_specifier("JavaVersion.VERSION_11", strict=False)
+    <SpecifierSet('~=11.0')>
+
     """
     if specifier is None:
         return None
@@ -489,6 +561,8 @@ def parse_java_specifier(specifier: str | list[str | None] | None) -> SpecifierS
         major = matches.group("major")
         update = matches.group("update")
         build = matches.group("build")
+        if not strict:
+            return SpecifierSet(f"~={major}.0")
         if build is not None:
             build = build.removeprefix("-b")
             build_was = build
@@ -512,6 +586,8 @@ def parse_java_specifier(specifier: str | list[str | None] | None) -> SpecifierS
             update = None
         java_version = JavaVersion.from_version(f"{major}.{minor}")
         if java_version is not None:
+            if not strict:
+                return SpecifierSet(java_version.specifier)
             new_parts = java_version.major_minor.split(".")
             parts = [major, minor, point]
             if update is not None:
@@ -520,6 +596,8 @@ def parse_java_specifier(specifier: str | list[str | None] | None) -> SpecifierS
                 new_parts.append(parts[len(new_parts)])
             # we use == here because the asked-for java version was 3 segments
             return SpecifierSet("==" + ".".join(new_parts))
+        if not strict:
+            return SpecifierSet(f"~={major}.{minor}")
         return SpecifierSet(f"=={major}.{minor}.{point}+u{update}")
 
     # jdk 11.1.2-123
@@ -540,7 +618,7 @@ def parse_java_specifier(specifier: str | list[str | None] | None) -> SpecifierS
             build = None
         java_version = JavaVersion.from_version(f"{major}.{minor}")
         if java_version is not None:
-            if point is None:
+            if point is None or not strict:
                 return SpecifierSet(java_version.specifier)
             new_parts = java_version.major_minor.split(".")
             parts = [major, minor, point]
@@ -557,9 +635,11 @@ def parse_java_specifier(specifier: str | list[str | None] | None) -> SpecifierS
             return specifier_set
 
     parts = specifier.split(".")
-    if len(parts) == 3:
+    if len(parts) >= 3:
         java_version = JavaVersion.from_version(".".join(parts[:1]))
         if java_version is not None:
+            if not strict:
+                return SpecifierSet(java_version.specifier)
             canonical = java_version.canonical
             new_parts = canonical.split(".")
             while len(new_parts) < len(parts):
@@ -579,14 +659,14 @@ def parse_java_specifier(specifier: str | list[str | None] | None) -> SpecifierS
     return None
 
 
-def find_python_toml_version(path: pathlib.Path, selector: str) -> FoundVersion | None:
+def find_python_toml_version(path: pathlib.Path, selector: str) -> utils.FoundVersion | None:
     """Extract a version from a TOML file."""
     value = utils.toml_var(path, selector)
     if value is None:
         return None
     specifier = parse_python_specifier(value)
     if specifier:
-        return FoundVersion(path, selector, specifier, value)
+        return utils.FoundVersion(path, selector, specifier, value)
     return None
 
 

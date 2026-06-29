@@ -9,11 +9,23 @@ import re
 import subprocess
 import tomllib
 import typing
+from collections import defaultdict
 
 import pathspec
 import yaml
+from packaging.specifiers import SpecifierSet
 
 logger = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass
+class FoundVersion:
+    """Data about a python version as found in a file."""
+
+    file: pathlib.Path
+    selector: str
+    specifier_set: SpecifierSet
+    original_string: str
 
 
 @dataclasses.dataclass
@@ -171,7 +183,7 @@ def deep_get(data: typing.Any, variable: str) -> typing.Any:
                     logger.exception("Error parsing %s as a list index at %s", part, consumed)
                     return None
             else:
-                logger.warning("%s not in %s at %s", variable, data, consumed)
+                logger.debug("%s not in %s at %s", variable, data, consumed)
                 return None
     return remaining
 
@@ -251,3 +263,22 @@ def run(*args: str, cwd: pathlib.Path | None = None) -> list[str]:
         if proc.stdout is not None:
             return proc.stdout.read().decode("UTF8").strip().split("\n")
     return []
+
+
+def dump_versions(found_versions: list[FoundVersion]) -> None:
+    """Print where we found the versions."""
+    if not found_versions:
+        logger.debug("No specifiers found")
+        return
+    restrictions: dict[str, list[FoundVersion]] = defaultdict(list)
+    for found_version in found_versions:
+        restrictions[f"{found_version.specifier_set}"].append(found_version)
+    for specifier_set, found in restrictions.items():
+        logger.info(specifier_set)
+        for found_version in found:
+            logger.info(
+                "    %s %s %r",
+                pathlib.Path(os.path.relpath(found_version.file, pathlib.Path.cwd())),
+                found_version.selector,
+                found_version.original_string,
+            )
