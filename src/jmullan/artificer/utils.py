@@ -1,19 +1,18 @@
 """Utility functions for various artificer needs."""
 
 import dataclasses
-import io
 import logging
 import os
 import pathlib
 import re
-import subprocess
 import tomllib
 import typing
 from collections import defaultdict
 
-import pathspec
 import yaml
 from packaging.specifiers import SpecifierSet
+
+from jmullan.artificer import file_utils
 
 logger = logging.getLogger(__name__)
 
@@ -24,93 +23,8 @@ class FoundVersion:
 
     file: pathlib.Path
     selector: str
-    specifier_set: SpecifierSet
     original_string: str
-
-
-@dataclasses.dataclass
-class GlobbedFile:
-    """Represents a file and how it was found."""
-
-    glob: str
-    file_path: pathlib.Path
-    handle: io.TextIOWrapper
-
-
-def rglob_from_dir_containing(
-    signpost_path: str,
-    glob: str,
-    max_depth: int | None = None,
-    git_ignore_spec: pathspec.PathSpec | None = None,
-    limit: int | None = None,
-) -> typing.Generator[GlobbedFile, typing.Any]:
-    """Find a file in a directory containing a file."""
-    signpost = find_up(signpost_path)
-
-    if signpost is not None and signpost.exists() and signpost.parent.is_dir():
-        rglob(signpost.parent, glob, max_depth, git_ignore_spec, limit)
-        for found_file in signpost.parent.rglob(glob):
-            with found_file.open("r") as file_handle:
-                logger.debug("Found %s %s", glob, found_file)
-                yield GlobbedFile(glob, found_file, file_handle)
-
-
-def rglob(  # noqa: PLR0912 C901
-    path: pathlib.Path,
-    glob: str,
-    max_depth: int | None = None,
-    git_ignore_spec: pathspec.PathSpec | None = None,
-    limit: int | None = None,
-) -> list[pathlib.Path]:
-    """Look for files that match the glob but are not excluded."""
-    files: list[pathlib.Path] = []
-    if path is None or not path.exists() or glob is None or not len(glob):
-        return files
-    if max_depth is None:
-        max_depth = len(glob)
-    if max_depth is None:
-        logger.debug("max_depth set to None, using built-in rglob")
-        return list(path.rglob(glob))
-    has_sep = any(sep in glob for sep in ("/", os.sep))
-
-    root_depth = len(path.parts)
-    logger.debug("max_depth set to %s, using custom rglob", max_depth)
-    for directory_path_string, directory_names, filenames in os.walk(path):
-        dir_path = pathlib.Path(directory_path_string)
-        depth = len(dir_path.parts) - root_depth
-        if depth >= max_depth:
-            # stop descending
-            directory_names[:] = []
-        if git_ignore_spec is not None:
-            for d in list(directory_names):
-                if git_ignore_spec.match_file(d) or git_ignore_spec.match_file(dir_path / d):
-                    directory_names.remove(d)
-        if git_ignore_spec is not None:
-            filenames = [f for f in filenames if not git_ignore_spec.match_file(f)]  # noqa: PLW2901
-        for filename in filenames:
-            found_path = dir_path / filename
-            if git_ignore_spec is not None and git_ignore_spec.match_file(found_path):
-                continue
-            if has_sep:
-                matched = found_path.match(glob)
-            else:
-                matched = pathlib.Path(filename).match(glob)
-            if matched:
-                files.append(found_path)
-                if limit is not None and len(files) >= limit:
-                    return files
-    return files
-
-
-def find_ignored_files(in_dir: pathlib.Path) -> set[pathlib.Path] | None:
-    """Ask git to tell us what files can be ignored."""
-    dot_git = find_up(".git")
-    if dot_git is None or not dot_git.is_dir():
-        return None
-
-    command = ("git", "ls-files", "--others", "-i", "--exclude-standard")
-    files = run(*command, cwd=in_dir)
-    return {in_dir / file_name for file_name in files if file_name is not None}
+    specifier_set: SpecifierSet
 
 
 def toml_var(filename: str | pathlib.Path, variable: str) -> typing.Any:
@@ -188,20 +102,6 @@ def deep_get(data: typing.Any, variable: str) -> typing.Any:
     return remaining
 
 
-def find_up(filename: str | pathlib.Path) -> pathlib.Path | None:
-    """Look for a file in a parent directory."""
-    current_dir = pathlib.Path().absolute()
-    test_path = current_dir / filename
-    if test_path.exists():
-        return test_path
-    for ancestor in current_dir.parents:
-        test_path = ancestor / filename
-        if test_path.exists():
-            return test_path
-        current_dir = current_dir.parent
-    return None
-
-
 def rglob_var(document: typing.Any, var_name: str) -> list[typing.Any]:
     """Find a variable in a data structure."""
     if document is None:
@@ -220,49 +120,24 @@ def rglob_var(document: typing.Any, var_name: str) -> list[typing.Any]:
     return variables
 
 
-def load_global_gitignore() -> pathspec.PathSpec | None:
-    """Look for a global .gitignore file to find ignorable paths."""
-    command = ("git", "config", "--get", "core.excludesfile")
-    file_paths = run(*command)
-    if file_paths is None:
-        return None
-    for file_path in file_paths:
-        git_ignore = pathlib.Path(file_path.strip()).expanduser()
-        if git_ignore.is_file():
-            with git_ignore.open("r", encoding="UTF-8") as fh:
-                return pathspec.PathSpec.from_lines("gitwildmatch", fh)
-    return None
-
-
 def find_dockerfiles(in_dir: pathlib.Path) -> set[pathlib.Path]:
     """Look for Dockerfiles recursively.
 
     This can be expensive!
     """
-    ignored_files = find_ignored_files(in_dir)
+    ignored_files = file_utils.find_ignored_files(in_dir)
     if ignored_files is None:
         # we are not in a git-controlled dir, so limit depth
-        git_ignore_spec = load_global_gitignore()
-        dockerfiles = rglob(in_dir, "Dockerfile*", 4, git_ignore_spec=git_ignore_spec, limit=10)
+        git_ignore_spec = file_utils.load_global_gitignore()
+        dockerfiles = file_utils.rglob(in_dir, "Dockerfile*", 4, git_ignore_spec=git_ignore_spec, limit=10)
         dockerfiles = [p for p in dockerfiles if p.is_file()]
     else:
-        dockerfiles = [p for p in rglob(in_dir, "Dockerfile*") if p.is_file()]
+        dockerfiles = [p for p in file_utils.rglob(in_dir, "Dockerfile*") if p.is_file()]
     found = {p.resolve() for p in dockerfiles}
     if ignored_files is not None:
         ignored = {p.resolve() for p in ignored_files}
         return found - ignored
     return found
-
-
-def run(*args: str, cwd: pathlib.Path | None = None) -> list[str]:
-    """Run a command and return the output as a list."""
-    if (len(args)) == 1 and " " in args[0]:
-        return run(*(args[0].split(" ")), cwd=cwd)
-    logger.debug("Running %s", " ".join(args))
-    with subprocess.Popen(args, stdout=subprocess.PIPE, cwd=cwd) as proc:  # noqa: S603
-        if proc.stdout is not None:
-            return proc.stdout.read().decode("UTF8").strip().split("\n")
-    return []
 
 
 def dump_versions(found_versions: list[FoundVersion]) -> None:

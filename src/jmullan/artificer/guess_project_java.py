@@ -1,7 +1,6 @@
 """Look in various files to guess the desired python version."""
 
 import logging
-import os
 import pathlib
 import re
 import sys
@@ -16,14 +15,7 @@ from packaging.specifiers import Specifier, SpecifierSet
 from jmullan.cmd import cmd
 from jmullan.logging import easy_logging, formatters
 
-from jmullan.artificer import utils
-from jmullan.artificer.chomp_python_version import (
-    JavaVersion,
-    SDKManVersion,
-    get_matching_java_versions,
-    parse_java_specifier,
-    specifier_set_contains_java_version,
-)
+from jmullan.artificer import file_utils, java_version, utils
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +33,7 @@ def xml_vars(filename: str | pathlib.Path, namespace: dict[str, str], selector: 
 
 
 def find_xml_versions(
-    path: pathlib.Path, namespace: dict[str, str], selector: str, strict: bool = False
+    path: pathlib.Path, namespace: dict[str, str], selector: str, *, strict: bool = False
 ) -> list[utils.FoundVersion] | None:
     """Extract a version from a TOML file."""
     values = xml_vars(path, namespace, selector)
@@ -52,9 +44,9 @@ def find_xml_versions(
 
     found_versions = []
     for value in values:
-        specifier = parse_java_specifier(value, strict=strict)
+        specifier = java_version.parse_java_specifier(value, strict=strict)
         if specifier:
-            found_versions.append(utils.FoundVersion(path, selector, specifier, value))
+            found_versions.append(utils.FoundVersion(path, selector, value, specifier))
     return found_versions
 
 
@@ -63,9 +55,9 @@ def find_yaml_version(path: pathlib.Path, selector: str) -> utils.FoundVersion |
     value = utils.yaml_var(path, selector)
     if value is None:
         return None
-    specifier = parse_java_specifier(value)
+    specifier = java_version.parse_java_specifier(value)
     if specifier:
-        return utils.FoundVersion(path, selector, specifier, value)
+        return utils.FoundVersion(path, selector, value, specifier)
     return None
 
 
@@ -80,7 +72,7 @@ def extract_java_versions(found_versions: list[utils.FoundVersion]) -> set[str]:
             if isinstance(specifier, Specifier) and specifier.operator == "===":
                 versions.add(specifier.version)
 
-        matching_versions = get_matching_java_versions(found_version.specifier_set)
+        matching_versions = java_version.get_matching_java_versions(found_version.specifier_set)
         if matching_versions is not None:
             versions.update(matching_versions)
     return versions
@@ -91,19 +83,19 @@ def find_pom_xml_files() -> set[pathlib.Path]:
 
     This can be expensive!
     """
-    dot_git = utils.find_up(".git")
+    dot_git = file_utils.find_up(".git")
     if dot_git is not None and dot_git.is_dir():
         in_dir = dot_git.parent
     else:
         in_dir = pathlib.Path.cwd()
-    ignored_files = utils.find_ignored_files(in_dir)
+    ignored_files = file_utils.find_ignored_files(in_dir)
     if ignored_files is None:
         # we are not in a git-controlled dir, so limit depth
-        git_ignore_spec = utils.load_global_gitignore()
-        pom_files = utils.rglob(in_dir, "pom.xml", 4, git_ignore_spec=git_ignore_spec, limit=10)
+        git_ignore_spec = file_utils.load_global_gitignore()
+        pom_files = file_utils.rglob(in_dir, "pom.xml", 4, git_ignore_spec=git_ignore_spec, limit=10)
         pom_files = [p for p in pom_files if p.is_file()]
     else:
-        pom_files = [p for p in utils.rglob(in_dir, "pom.xml") if p.is_file()]
+        pom_files = [p for p in file_utils.rglob(in_dir, "pom.xml") if p.is_file()]
     found = {p.resolve() for p in pom_files}
     if ignored_files is not None:
         ignored = {p.resolve() for p in ignored_files}
@@ -111,7 +103,7 @@ def find_pom_xml_files() -> set[pathlib.Path]:
     return found
 
 
-def find_maven_versions(strict: bool = False) -> list[utils.FoundVersion]:
+def find_maven_versions(*, strict: bool = False) -> list[utils.FoundVersion]:
     """Look for versions in pyproject versions."""
     logger.debug("Finding maven versions...")
     found_versions: list[utils.FoundVersion] = []
@@ -138,41 +130,43 @@ def find_maven_versions(strict: bool = False) -> list[utils.FoundVersion]:
 
 
 gradle_support = {
-    JavaVersion.JAVA_8: SpecifierSet(">=2.0,<=8.15"),
-    JavaVersion.JAVA_9: SpecifierSet(">=4.3,<=8.15"),
-    JavaVersion.JAVA_10: SpecifierSet(">=4.7,<=8.15"),
-    JavaVersion.JAVA_11: SpecifierSet(">=5.0,<=8.15"),
-    JavaVersion.JAVA_12: SpecifierSet(">=5.4,<=8.15"),
-    JavaVersion.JAVA_13: SpecifierSet(">=6.0,<=8.15"),
-    JavaVersion.JAVA_14: SpecifierSet(">=6.3,<=8.15"),
-    JavaVersion.JAVA_15: SpecifierSet(">=6.7,<=8.15"),
-    JavaVersion.JAVA_16: SpecifierSet(">=7.0,<=8.15"),
-    JavaVersion.JAVA_17: SpecifierSet(">=7.3"),
-    JavaVersion.JAVA_18: SpecifierSet(">=7.5"),
-    JavaVersion.JAVA_19: SpecifierSet(">=7.6"),
-    JavaVersion.JAVA_20: SpecifierSet(">=8.3"),
-    JavaVersion.JAVA_21: SpecifierSet(">=8.5"),
-    JavaVersion.JAVA_22: SpecifierSet(">=8.8"),
-    JavaVersion.JAVA_23: SpecifierSet(">=8.10"),
-    JavaVersion.JAVA_24: SpecifierSet(">=8.14"),
-    JavaVersion.JAVA_25: SpecifierSet(">=9.1.0"),
-    JavaVersion.JAVA_26: SpecifierSet(">=9.4.0"),
+    java_version.JavaVersion.JAVA_8: SpecifierSet(">=2.0,<=8.15"),
+    java_version.JavaVersion.JAVA_9: SpecifierSet(">=4.3,<=8.15"),
+    java_version.JavaVersion.JAVA_10: SpecifierSet(">=4.7,<=8.15"),
+    java_version.JavaVersion.JAVA_11: SpecifierSet(">=5.0,<=8.15"),
+    java_version.JavaVersion.JAVA_12: SpecifierSet(">=5.4,<=8.15"),
+    java_version.JavaVersion.JAVA_13: SpecifierSet(">=6.0,<=8.15"),
+    java_version.JavaVersion.JAVA_14: SpecifierSet(">=6.3,<=8.15"),
+    java_version.JavaVersion.JAVA_15: SpecifierSet(">=6.7,<=8.15"),
+    java_version.JavaVersion.JAVA_16: SpecifierSet(">=7.0,<=8.15"),
+    java_version.JavaVersion.JAVA_17: SpecifierSet(">=7.3"),
+    java_version.JavaVersion.JAVA_18: SpecifierSet(">=7.5"),
+    java_version.JavaVersion.JAVA_19: SpecifierSet(">=7.6"),
+    java_version.JavaVersion.JAVA_20: SpecifierSet(">=8.3"),
+    java_version.JavaVersion.JAVA_21: SpecifierSet(">=8.5"),
+    java_version.JavaVersion.JAVA_22: SpecifierSet(">=8.8"),
+    java_version.JavaVersion.JAVA_23: SpecifierSet(">=8.10"),
+    java_version.JavaVersion.JAVA_24: SpecifierSet(">=8.14"),
+    java_version.JavaVersion.JAVA_25: SpecifierSet(">=9.1.0"),
+    java_version.JavaVersion.JAVA_26: SpecifierSet(">=9.4.0"),
 }
 
 
-def find_gradle_versions(strict: bool = False) -> list[utils.FoundVersion]:
+def find_gradle_versions(*, strict: bool = False) -> list[utils.FoundVersion]:
     """Look for versions in Gradle files."""
     logger.debug("Finding gradle versions...")
     found_versions: list[utils.FoundVersion] = []
-    for build_gradle in utils.rglob_from_dir_containing(".git", "build.gradle"):
+    found_version: utils.FoundVersion | None
+    for build_gradle in file_utils.rglob_from_dir_containing(".git", "build.gradle"):
         logger.debug("Found build.gradle %s", build_gradle.file_path)
         for line in build_gradle.handle:
-            original_string, specifier = extract_java_specifier_from_gradle_line(line, strict=strict)
+            specifier = extract_java_specifier_from_gradle_line(line, strict=strict)
             if specifier:
-                found_version = utils.FoundVersion(build_gradle.file_path, "FROM", specifier, line.strip())
-                found_versions.append(found_version)
+                found_version = utils.FoundVersion(build_gradle.file_path, "FROM", line.strip(), specifier)
+                if found_version:
+                    found_versions.append(found_version)
                 continue
-    for gradle_properties in utils.rglob_from_dir_containing(".git", "gradle/wrapper/gradle-wrapper.properties"):
+    for gradle_properties in file_utils.rglob_from_dir_containing(".git", "gradle/wrapper/gradle-wrapper.properties"):
         for line in gradle_properties.handle:
             found_version = get_gradle_line_found_version(line, gradle_properties)
             if found_version is not None:
@@ -180,7 +174,8 @@ def find_gradle_versions(strict: bool = False) -> list[utils.FoundVersion]:
     return found_versions
 
 
-def get_gradle_line_found_version(line: str, gradle_properties: utils.GlobbedFile) -> utils.FoundVersion | None:
+def get_gradle_line_found_version(line: str, gradle_properties: file_utils.GlobbedFile) -> utils.FoundVersion | None:
+    """Given a line of text in a Gradle file, return a found version if possible."""
     line = re.sub("#.*", "", line).strip()
     if not len(line) or "=" not in line:
         return None
@@ -188,24 +183,24 @@ def get_gradle_line_found_version(line: str, gradle_properties: utils.GlobbedFil
     if key != "distributionUrl":
         return None
     # https\://services.gradle.org/distributions/gradle-5.4.1-all.zip
-    gradle_zip_file = os.path.basename(value)
+    gradle_zip_file = pathlib.Path(value).name
     matches = re.search(r"gradle-(?P<version>[^-]+)-", gradle_zip_file)
     if matches:
         version = matches.group("version")
         min_java_version = None
         max_java_version = None
-        for java_version, gradle_specifier in gradle_support.items():
+        for java_version_enum, gradle_specifier in gradle_support.items():
             if version in gradle_specifier:
                 if min_java_version is None:
-                    min_java_version = java_version
-                max_java_version = java_version
+                    min_java_version = java_version_enum
+                max_java_version = java_version_enum
         if min_java_version is not None:
             if max_java_version is None:
-                max_java_version = JavaVersion.JAVA_26
+                max_java_version = java_version.JavaVersion.JAVA_26
             version_range = f">={min_java_version.major_minor},<={max_java_version.next_major_minor}"
             logger.debug("gradle wrapper version %s -> %s", version, version_range)
             gradle_based_specifier = SpecifierSet(version_range)
-            return utils.FoundVersion(gradle_properties.file_path, ".", gradle_based_specifier, line.strip())
+            return utils.FoundVersion(gradle_properties.file_path, ".", line.strip(), gradle_based_specifier)
     return None
 
 
@@ -213,69 +208,67 @@ gradle_line_matchers = [
     r"projectJavaVersion *= *[\"']?(?P<version>[.0-9]+)[\"']?",
     r"sourceCompatibility *= *(?P<version>JavaVersion.VERSION_([0-9_]+))",
     r"targetCompatibility *= *(?P<version>JavaVersion.VERSION_([0-9_]+))",
+    r"JavaLanguageVersion.of\((?P<version>[0-9_]+)\)",
 ]
 
 
-def extract_java_specifier_from_gradle_line(line: str, strict: bool = False) -> tuple[str | None, SpecifierSet | None]:
+def extract_java_specifier_from_gradle_line(line: str, *, strict: bool = False) -> SpecifierSet | None:
     """Get a java version from a dockerfile line.
 
     >>> extract_java_specifier_from_jenkins_line(
     ...     'JAVA_HOME = "/opt/openjdk/jdk8u462-b08"', strict=True
     ... )
-    ('8u462-b08', <SpecifierSet('==8.0.462+8')>)
+    <SpecifierSet('==8.0.462+8')>
     >>> extract_java_specifier_from_jenkins_line(
     ...     "JAVA_HOME = '/usr/lib/jvm/java-11-openjdk-amd64'", strict=True
     ... )
-    ('11', <SpecifierSet('~=11.0')>)
+    <SpecifierSet('~=11.0')>
     >>> extract_java_specifier_from_jenkins_line(
     ...     'JAVA_HOME = "/opt/openjdk/jdk-17.0.4.1+1/"', strict=True
     ... )
-    ('17.0.4.1+1', <SpecifierSet('==17.0.4.1+1')>)
-    >>> extract_java_specifier_from_jenkins_line("", strict=True)
-    (None, None)
-
+    <SpecifierSet('==17.0.4.1+1')>
     >>> extract_java_specifier_from_jenkins_line(
     ...     'JAVA_HOME = "/opt/openjdk/jdk8u462-b08"', strict=False
     ... )
-    ('8u462-b08', <SpecifierSet('~=8.0')>)
+    <SpecifierSet('~=8.0')>
     >>> extract_java_specifier_from_jenkins_line(
     ...     "JAVA_HOME = '/usr/lib/jvm/java-11-openjdk-amd64'", strict=False
     ... )
-    ('11', <SpecifierSet('~=11.0')>)
+    <SpecifierSet('~=11.0')>
     >>> extract_java_specifier_from_jenkins_line(
     ...     'JAVA_HOME = "/opt/openjdk/jdk-17.0.4.1+1/"', strict=False
     ... )
-    ('17.0.4.1+1', <SpecifierSet('~=17.0')>)
+    <SpecifierSet('~=17.0')>
     >>> extract_java_specifier_from_jenkins_line("", strict=False)
-    (None, None)
     """
     line = line.strip()
     for matcher in gradle_line_matchers:
         matches = re.search(matcher, line)
         if matches:
             version = matches.group("version")
-            return version, parse_java_specifier(version, strict=strict)
-    return None, None
+            return java_version.parse_java_specifier(version, strict=strict)
+    return None
 
 
 def find_runtime_txt_version() -> list[utils.FoundVersion]:
     """Look for python versions in .venv files."""
     found_versions: list[utils.FoundVersion] = []
-    runtime_txt_version = utils.find_up("runtime.txt")
+    runtime_txt_version = file_utils.find_up("runtime.txt")
     if runtime_txt_version is not None and runtime_txt_version.is_file():
         logger.debug("Found runtime.txt")
         with runtime_txt_version.open("r") as handle:
             for line in handle:
-                specifier = parse_java_specifier(line)
+                specifier = java_version.parse_java_specifier(line)
                 if specifier:
-                    found_version = utils.FoundVersion(runtime_txt_version, ".", specifier, line.strip())
+                    found_version = utils.FoundVersion(runtime_txt_version, ".", line.strip(), specifier)
                     found_versions.append(found_version)
     return found_versions
 
 
-def find_github_action_java_versions(strict: bool = False) -> list[utils.FoundVersion]:
+def find_github_action_java_versions(*, strict: bool = False) -> list[utils.FoundVersion]:
+    """Look for GitHub actions and then look for java versions in those files."""
     found_versions: list[utils.FoundVersion] = []
-    for workflow_yaml in utils.rglob_from_dir_containing(".github", ".github/workflows/*.yml"):
+    for workflow_yaml in file_utils.rglob_from_dir_containing(".github", ".github/workflows/*.yml"):
         logger.debug("Found workflow_yaml %s", workflow_yaml.file_path)
         documents = yaml.safe_load_all(workflow_yaml.handle)
         for index, document in enumerate(documents):
@@ -283,24 +276,25 @@ def find_github_action_java_versions(strict: bool = False) -> list[utils.FoundVe
             java_versions.extend(utils.rglob_var(document, "java_version"))
             java_versions.extend(utils.rglob_var(document, "java-version"))
             java_versions.extend(utils.rglob_var(document, "JAVA_VERSION"))
-            for java_version in java_versions:
-                specifier = parse_java_specifier(f"{java_version}", strict=strict)
+            for java_version_string in java_versions:
+                specifier = java_version.parse_java_specifier(f"{java_version_string}", strict=strict)
                 if specifier:
                     found_version = utils.FoundVersion(
-                        workflow_yaml.file_path, f"Document {index}", specifier, java_version
+                        workflow_yaml.file_path, f"Document {index}", java_version_string, specifier
                     )
                     found_versions.append(found_version)
     return found_versions
 
 
-def find_jenkins_file_versions(strict: bool = False) -> list[utils.FoundVersion]:
+def find_jenkins_file_versions(*, strict: bool = False) -> list[utils.FoundVersion]:
+    """Look for Jenkinsfiles and then look for java versions in those files."""
     found_versions: list[utils.FoundVersion] = []
-    for jenkins_file in utils.rglob_from_dir_containing(".git", "Jenkinsfile*"):
+    for jenkins_file in file_utils.rglob_from_dir_containing(".git", "Jenkinsfile*"):
         logger.debug("Found Jenkinsfile %s", jenkins_file.file_path)
         for line in jenkins_file.handle:
             original_string, specifier = extract_java_specifier_from_jenkins_line(line, strict=strict)
             if original_string is not None and specifier is not None:
-                found_version = utils.FoundVersion(jenkins_file.file_path, original_string, specifier, line.strip())
+                found_version = utils.FoundVersion(jenkins_file.file_path, original_string, line.strip(), specifier)
                 found_versions.append(found_version)
                 continue
     return found_versions
@@ -313,53 +307,48 @@ jenkins_line_matchers = [
 ]
 
 
-def extract_java_specifier_from_jenkins_line(line: str, strict: bool = False) -> tuple[str | None, SpecifierSet | None]:
+def extract_java_specifier_from_jenkins_line(line: str, *, strict: bool = False) -> SpecifierSet | None:
     """Get a java version from a dockerfile line.
 
     >>> extract_java_specifier_from_jenkins_line(
     ...     'JAVA_HOME = "/opt/openjdk/jdk8u462-b08"', strict=True
     ... )
-    ('8u462-b08', <SpecifierSet('==8.0.462+8')>)
+    <SpecifierSet('==8.0.462+8')>
     >>> extract_java_specifier_from_jenkins_line(
     ...     "JAVA_HOME = '/usr/lib/jvm/java-11-openjdk-amd64'", strict=True
     ... )
-    ('11', <SpecifierSet('~=11.0')>)
+    <SpecifierSet('~=11.0')>
     >>> extract_java_specifier_from_jenkins_line(
     ...     'JAVA_HOME = "/opt/openjdk/jdk-17.0.4.1+1/"', strict=True
     ... )
-    ('17.0.4.1+1', <SpecifierSet('==17.0.4.1+1')>)
-    >>> extract_java_specifier_from_jenkins_line("", strict=True)
-    (None, None)
-
+    <SpecifierSet('==17.0.4.1+1')>
     >>> extract_java_specifier_from_jenkins_line(
     ...     'JAVA_HOME = "/opt/openjdk/jdk8u462-b08"', strict=False
     ... )
-    ('8u462-b08', <SpecifierSet('~=8.0')>)
+    <SpecifierSet('~=8.0')>
     >>> extract_java_specifier_from_jenkins_line(
     ...     "JAVA_HOME = '/usr/lib/jvm/java-11-openjdk-amd64'", strict=False
     ... )
-    ('11', <SpecifierSet('~=11.0')>)
+    <SpecifierSet('~=11.0')>
     >>> extract_java_specifier_from_jenkins_line(
     ...     'JAVA_HOME = "/opt/openjdk/jdk-17.0.4.1+1/"', strict=False
     ... )
-    ('17.0.4.1+1', <SpecifierSet('~=17.0')>)
+    <SpecifierSet('~=17.0')>
     >>> extract_java_specifier_from_jenkins_line("", strict=False)
-    (None, None)
-
     """
     line = line.strip()
     for matcher in jenkins_line_matchers:
         matches = re.search(matcher, line)
         if matches:
             version = matches.group("version")
-            return version, parse_java_specifier(version, strict=strict)
-    return None, None
+            return java_version.parse_java_specifier(version, strict=strict)
+    return None
 
 
-def find_dockerfile_versions(strict: bool = False) -> list[utils.FoundVersion]:
+def find_dockerfile_versions(*, strict: bool = False) -> list[utils.FoundVersion]:
     """Look for python versions in Dockerfiles."""
     found_versions: list[utils.FoundVersion] = []
-    dot_git = utils.find_up(".git")
+    dot_git = file_utils.find_up(".git")
     if dot_git is not None and dot_git.is_dir():
         dockerfiles = utils.find_dockerfiles(dot_git.parent)
     else:
@@ -369,56 +358,53 @@ def find_dockerfile_versions(strict: bool = False) -> list[utils.FoundVersion]:
             logger.debug("Found dockerfile %s", dockerfile)
             with dockerfile.open("r") as handle:
                 for line in handle:
-                    original_string, specifier = extract_java_specifier_from_docker_line(line, strict=strict)
+                    specifier = extract_java_specifier_from_docker_line(line, strict=strict)
                     if specifier:
-                        found_version = utils.FoundVersion(dockerfile, "FROM", specifier, line.strip())
+                        found_version = utils.FoundVersion(dockerfile, "FROM", line.strip(), specifier)
                         found_versions.append(found_version)
                         continue
     return found_versions
 
 
-def extract_java_specifier_from_docker_line(
-    line: str, strict: bool = False
-) -> tuple[None, None] | tuple[str, SpecifierSet]:
+def extract_java_specifier_from_docker_line(line: str, *, strict: bool = False) -> SpecifierSet | None:
     """Get a java version from a dockerfile line if possible.
+
     >>> extract_java_specifier_from_docker_line(
     ...     "FROM registry.example.com/thing/jetty-foo:9.4.43-java17-buster-yy0.0.2",
     ...     strict=True,
     ... )
-    ('17-buster-yy0.0.2', <SpecifierSet('~=17.0')>)
+    <SpecifierSet('~=17.0')>
     >>> extract_java_specifier_from_docker_line(
     ...     "FROM registry.example.com/java-foo:11.0-stretch-yy0.0.1", strict=True
     ... )
-    ('11.0-stretch-yy0.0.1', <SpecifierSet('~=11.0')>)
-    >>> extract_java_specifier_from_docker_line("", strict=True)
-    (None, None)
+    <SpecifierSet('~=11.0')>
     >>> extract_java_specifier_from_docker_line(
     ...     "FROM registry.example.com/java-foo:11.0.1-stretch-xx0.0.1", strict=True
     ... )
-    ('11.0.1-stretch-xx0.0.1', <SpecifierSet('==11.0.1+stretch-xx0.0.1')>)
+    <SpecifierSet('==11.0.1+stretch-xx0.0.1')>
     >>> extract_java_specifier_from_docker_line(
     ...     "FROM registry.example.com/java-foo:11-stretch-yy0.0.1", strict=True
     ... )
-    ('11-stretch-yy0.0.1', <SpecifierSet('~=11.0')>)
+    <SpecifierSet('~=11.0')>
     >>> extract_java_specifier_from_docker_line(
     ...     "FROM registry.example.com/thing/jetty-foo:9.4.43-java17-buster-yy0.0.2",
     ...     strict=False,
     ... )
-    ('17-buster-yy0.0.2', <SpecifierSet('~=17.0')>)
+    <SpecifierSet('~=17.0')>
     >>> extract_java_specifier_from_docker_line(
     ...     "FROM registry.example.com/java-foo:11.0-stretch-yy0.0.1", strict=False
     ... )
-    ('11.0-stretch-yy0.0.1', <SpecifierSet('~=11.0')>)
-    >>> extract_java_specifier_from_docker_line("", strict=False)
-    (None, None)
+    <SpecifierSet('~=11.0')>
     >>> extract_java_specifier_from_docker_line(
     ...     "FROM registry.example.com/java-foo:11.0.1-stretch-xx0.0.1", strict=False
     ... )
-    ('11.0.1-stretch-xx0.0.1', <SpecifierSet('~=11.0')>)
+    <SpecifierSet('~=11.0')>
     >>> extract_java_specifier_from_docker_line(
     ...     "FROM registry.example.com/java-foo:11-stretch-yy0.0.1", strict=False
     ... )
-    ('11-stretch-yy0.0.1', <SpecifierSet('~=11.0')>)
+    <SpecifierSet('~=11.0')>
+    >>> extract_java_specifier_from_docker_line("", strict=False)
+    >>> extract_java_specifier_from_docker_line("", strict=True)
     """
     line = line.strip()
     matches = re.match(r"^FROM +(?P<docker_base_image>.*)", line)
@@ -427,7 +413,7 @@ def extract_java_specifier_from_docker_line(
         specifier = extract_java_specifier_from_docker_base_image(version, strict=strict)
         if specifier:
             return specifier
-    return None, None
+    return None
 
 
 build_sbt_docker_matchers = [
@@ -443,59 +429,54 @@ build_sbt_docker_matchers = [
 
 
 def extract_java_specifier_from_docker_base_image(
-    docker_base_image: str, strict: bool = False
-) -> tuple[None, None] | tuple[str, SpecifierSet]:
+    docker_base_image: str, *, strict: bool = False
+) -> SpecifierSet | None:
     """Look for a java version in a docker image name.
 
     >>> extract_java_specifier_from_docker_base_image(
     ...     "registry.example.com/thing/jetty-foo:9.4.43-java17-buster-yy0.0.2",
     ...     strict=True,
     ... )
-    ('17-buster-yy0.0.2', <SpecifierSet('~=17.0')>)
+    <SpecifierSet('~=17.0')>
     >>> extract_java_specifier_from_docker_base_image(
     ...     "registry.example.com/java-foo:11.0.1-stretch-xx0.0.1", strict=True
     ... )
-    ('11.0.1-stretch-xx0.0.1', <SpecifierSet('==11.0.1+stretch-xx0.0.1')>)
+    <SpecifierSet('==11.0.1+stretch-xx0.0.1')>
     >>> extract_java_specifier_from_docker_base_image(
     ...     "amazoncorretto:17.0.5-al2", strict=True
     ... )
-    ('17.0.5-al2', <SpecifierSet('==17.0.5+al2')>)
+    <SpecifierSet('==17.0.5+al2')>
     >>> extract_java_specifier_from_docker_base_image(
     ...     "amazoncorretto21:latest", strict=True
     ... )
-    ('21', <SpecifierSet('~=21.0')>)
+    <SpecifierSet('~=21.0')>
     >>> extract_java_specifier_from_docker_base_image(
     ...     "amazoncorretto:latest", strict=True
     ... )
-    ('amazoncorretto:latest', <SpecifierSet('~=8.0')>)
-    >>> extract_java_specifier_from_docker_base_image("amazoncorretto", strict=True)
-    (None, None)
-
+    <SpecifierSet('~=8.0')>
     >>> extract_java_specifier_from_docker_base_image(
     ...     "registry.example.com/thing/jetty-foo:9.4.43-java17-buster-yy0.0.2",
     ...     strict=False,
     ... )
-    ('17-buster-yy0.0.2', <SpecifierSet('~=17.0')>)
+    <SpecifierSet('~=17.0')>
     >>> extract_java_specifier_from_docker_base_image(
     ...     "registry.example.com/java-foo:11.0.1-stretch-xx0.0.1", strict=False
     ... )
-    ('11.0.1-stretch-xx0.0.1', <SpecifierSet('~=11.0')>)
+    <SpecifierSet('~=11.0')>
     >>> extract_java_specifier_from_docker_base_image(
     ...     "amazoncorretto:17.0.5-al2", strict=False
     ... )
-    ('17.0.5-al2', <SpecifierSet('~=17.0')>)
+    <SpecifierSet('~=17.0')>
     >>> extract_java_specifier_from_docker_base_image(
     ...     "amazoncorretto21:latest", strict=False
     ... )
-    ('21', <SpecifierSet('~=21.0')>)
+    <SpecifierSet('~=21.0')>
     >>> extract_java_specifier_from_docker_base_image(
     ...     "amazoncorretto:latest", strict=False
     ... )
-    ('amazoncorretto:latest', <SpecifierSet('~=8.0')>)
+    <SpecifierSet('~=8.0')>
     >>> extract_java_specifier_from_docker_base_image("amazoncorretto", strict=False)
-    (None, None)
-
-
+    >>> extract_java_specifier_from_docker_base_image("amazoncorretto", strict=True)
     """
     for docker_matcher in build_sbt_docker_matchers:
         docker_matches = re.search(docker_matcher, docker_base_image)
@@ -505,18 +486,18 @@ def extract_java_specifier_from_docker_base_image(
             version = group_dict.get("version")
             if version == "latest":
                 if "short_version" not in group_dict:
-                    specifier = parse_java_specifier("8")
+                    specifier = java_version.parse_java_specifier("8")
                     if specifier is not None:
-                        return docker_base_image, specifier
+                        return specifier
                 else:
                     version = group_dict.get("short_version")
             if version is not None:
-                specifier = parse_java_specifier(version.replace("-", "+", 1), strict=strict)
+                specifier = java_version.parse_java_specifier(version.replace("-", "+", 1), strict=strict)
                 if specifier is not None:
-                    return version, specifier
+                    return specifier
     if docker_base_image == "amazoncorretto":
         logger.debug("Not picking a default version for amazoncorretto with no tags")
-    return None, None
+    return None
 
 
 build_sbt_line_matchers = [
@@ -525,76 +506,71 @@ build_sbt_line_matchers = [
 ]
 
 
-def extract_java_specifier_from_build_sbt_line(
-    line: str, strict: bool = False
-) -> tuple[None, None] | tuple[str, SpecifierSet]:
+def extract_java_specifier_from_build_sbt_line(line: str, *, strict: bool = False) -> SpecifierSet | None:
     """Get a java version from a build sbt line if possible.
 
     >>> extract_java_specifier_from_build_sbt_line(
     ...     '    dockerBaseImage := "amazoncorretto:17.0.5-al2"', strict=True
     ... )
-    ('17.0.5-al2', <SpecifierSet('==17.0.5+al2')>)
+    <SpecifierSet('==17.0.5+al2')>
     >>> extract_java_specifier_from_build_sbt_line(
     ...     '    dockerBaseImage        := s"$host/example-base-amzn2-java-amazoncorretto21:latest",',
     ...     strict=True,
     ... )
-    ('21', <SpecifierSet('~=21.0')>)
-    >>> extract_java_specifier_from_build_sbt_line("", strict=True)
-    (None, None)
-
+    <SpecifierSet('~=21.0')>
     >>> extract_java_specifier_from_build_sbt_line(
     ...     '    dockerBaseImage := "amazoncorretto:17.0.5-al2"', strict=False
     ... )
-    ('17.0.5-al2', <SpecifierSet('~=17.0')>)
+    <SpecifierSet('~=17.0')>
     >>> extract_java_specifier_from_build_sbt_line(
     ...     '    dockerBaseImage        := s"$host/example-base-amzn2-java-amazoncorretto21:latest",',
     ...     strict=False,
     ... )
-    ('21', <SpecifierSet('~=21.0')>)
+    <SpecifierSet('~=21.0')>
     >>> extract_java_specifier_from_build_sbt_line("", strict=False)
-    (None, None)
+    >>> extract_java_specifier_from_build_sbt_line("", strict=True)
     """
     line = line.strip()
     for matcher in build_sbt_line_matchers:
         matches = re.search(matcher, line)
         if matches:
             docker_base_image = matches.group("docker_base_image")
-            version, specifier = extract_java_specifier_from_docker_base_image(docker_base_image, strict=strict)
-            if version is not None and specifier is not None:
-                return version, specifier
-    return None, None
+            specifier = extract_java_specifier_from_docker_base_image(docker_base_image, strict=strict)
+            if specifier is not None:
+                return specifier
+    return None
 
 
 def find_build_sbt_versions() -> list[utils.FoundVersion]:
     """Look for python versions in Dockerfiles."""
     logger.debug("Finding build.sbt versions...")
     found_versions: list[utils.FoundVersion] = []
-    for build_sbt in utils.rglob_from_dir_containing(".git", "build.sbt"):
-        logger.debug("Found build.gradle %s", build_sbt.file_path)
+    for build_sbt in file_utils.rglob_from_dir_containing(".git", "build.sbt"):
+        logger.debug("Found build.sbt %s", build_sbt.file_path)
         for line in build_sbt.handle:
-            original_string, specifier = extract_java_specifier_from_build_sbt_line(line)
-            if original_string is not None and specifier is not None:
-                found_version = utils.FoundVersion(build_sbt.file_path, original_string, specifier, line.strip())
+            specifier = extract_java_specifier_from_build_sbt_line(line)
+            if specifier is not None:
+                found_version = utils.FoundVersion(build_sbt.file_path, line, line.strip(), specifier)
                 found_versions.append(found_version)
                 continue
     return found_versions
 
 
-def find_sdkman_rc_specifier(prefix: str, strict: bool = False) -> utils.FoundVersion | None:
+def find_sdkman_rc_specifier(prefix: str, *, strict: bool = False) -> utils.FoundVersion | None:
     """Look for an .sdkmanrc file and extract a version from it."""
-    sdkman_rc_path = utils.find_up(".sdkmanrc")
+    sdkman_rc_path = file_utils.find_up(".sdkmanrc")
     if sdkman_rc_path is not None:
         with sdkman_rc_path.open("r") as handle:
             for line in handle:
-                line = line.strip()
-                candidate = re.sub(r"#.*", "", line).strip()
+                stripped_line = line.strip()
+                candidate = re.sub(r"#.*", "", stripped_line).strip()
                 if len(candidate) == 0 or "=" not in candidate:
                     continue
                 key, value = candidate.split("=", 1)
                 if key == prefix:
-                    specifier = parse_java_specifier(value.replace("-", "+", 1), strict=strict)
+                    specifier = java_version.parse_java_specifier(value.replace("-", "+", 1), strict=strict)
                     if specifier:
-                        return utils.FoundVersion(sdkman_rc_path, value, specifier, line)
+                        return utils.FoundVersion(sdkman_rc_path, value, line, specifier)
                     logger.warning("Could not parse SDKMAN java version: %s", value)
     return None
 
@@ -604,7 +580,7 @@ def validate_sdkman_version(
 ) -> int:
     """Check that the .sdkmanrc version matches the given filters."""
     seen_combos: set[str] = set()
-    sdk_man_version = SDKManVersion(sdkman_rc_specifier.selector)
+    sdk_man_version = java_version.SDKManVersion(sdkman_rc_specifier.selector)
     for found_version in found_specifiers:
         if sdk_man_version not in found_version.specifier_set:
             combo = f"{sdk_man_version.version} {found_version.specifier_set}"
@@ -634,9 +610,9 @@ def filter_possible_versions(
                 "%s in %s == %s",
                 version,
                 specifier_set,
-                specifier_set_contains_java_version(specifier_set, version),
+                java_version.specifier_set_contains_java_version(specifier_set, version),
             )
-        iterable = specifier_set.filter(iterable, key=SDKManVersion)
+        iterable = specifier_set.filter(iterable, key=java_version.SDKManVersion)
     return list(iterable)
 
 
@@ -716,7 +692,7 @@ class Main(cmd.Main):
                 logger.debug("Only one version available from %s", possible_versions)
                 chosen = filtered[0]
             else:
-                sorted_versions = sorted(filtered, key=SDKManVersion)
+                sorted_versions = sorted(filtered, key=java_version.SDKManVersion)
                 logger.debug("Picking %s of %s", self.args.pick, len(sorted_versions))
                 if self.args.pick == "max":
                     chosen = sorted_versions[-1]

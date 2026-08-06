@@ -13,13 +13,7 @@ from packaging.version import Version
 from jmullan.cmd import cmd
 from jmullan.logging import easy_logging, formatters
 
-from jmullan.artificer import utils
-from jmullan.artificer.chomp_python_version import (
-    PythonVersion,
-    find_python_toml_version,
-    get_matching_python_versions,
-    parse_python_specifier,
-)
+from jmullan.artificer import file_utils, python_version, utils
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +23,9 @@ def find_yaml_version(path: pathlib.Path, selector: str) -> utils.FoundVersion |
     value = utils.yaml_var(path, selector)
     if value is None:
         return None
-    specifier = parse_python_specifier(value)
+    specifier = python_version.parse_python_specifier(value)
     if specifier:
-        return utils.FoundVersion(path, selector, specifier, value)
+        return utils.FoundVersion(path, selector, value, specifier)
     return None
 
 
@@ -45,7 +39,7 @@ def extract_versions(found_versions: list[utils.FoundVersion]) -> set[str]:
             if isinstance(specifier, Specifier):
                 if specifier.operator == "===":
                     versions.add(specifier.version)
-                matching_versions = get_matching_python_versions(str(specifier))
+                matching_versions = python_version.get_matching_python_versions(str(specifier))
                 if matching_versions is not None:
                     versions.update(matching_versions)
     return versions
@@ -54,7 +48,7 @@ def extract_versions(found_versions: list[utils.FoundVersion]) -> set[str]:
 def find_pyproject_versions() -> list[utils.FoundVersion]:
     """Look for versions in pyproject versions."""
     found_versions: list[utils.FoundVersion] = []
-    pyproject_path = utils.find_up("pyproject.toml")
+    pyproject_path = file_utils.find_up("pyproject.toml")
     if pyproject_path is not None and pyproject_path.exists():
         # version ranging
         pyproject_selectors = [
@@ -65,10 +59,11 @@ def find_pyproject_versions() -> list[utils.FoundVersion]:
             "tool.ruff.target-version",
         ]
         for selector in pyproject_selectors:
-            found_version = find_python_toml_version(pyproject_path, selector)
+            found_version = python_version.find_python_toml_version(pyproject_path, selector)
             if found_version is not None:
                 found_versions.append(found_version)
-    pre_commit_yaml_path = utils.find_up(".pre-commit-config.yaml")
+        found_versions.extend(find_file_versions(pyproject_path))
+    pre_commit_yaml_path = file_utils.find_up(".pre-commit-config.yaml")
     if pre_commit_yaml_path is not None and pre_commit_yaml_path.exists():
         logger.debug("Found pre-commit config")
         found_version = find_yaml_version(pre_commit_yaml_path, "default_language_version.python")
@@ -77,55 +72,33 @@ def find_pyproject_versions() -> list[utils.FoundVersion]:
     return found_versions
 
 
-def find_dot_venv_versions() -> list[utils.FoundVersion]:
-    """Look for python versions in .venv files."""
+def find_up_file_versions(filename: str) -> list[utils.FoundVersion]:
+    """Look for python versions in file somewhere in a parent dir."""
+    file_path = file_utils.find_up(filename)
+    if file_path is not None and file_path.is_file():
+        logger.info(f"Found {filename}")
+        return find_file_versions(file_path)
+    return []
+
+
+def find_file_versions(file_path: pathlib.Path) -> list[utils.FoundVersion]:
+    """Look for python versions in any file."""
     found_versions: list[utils.FoundVersion] = []
-    dot_venv = utils.find_up(".venv")
-    if dot_venv is not None and dot_venv.is_file():
-        logger.debug("Found .venv")
-        with dot_venv.open("r") as handle:
+    if file_path is not None and file_path.is_file():
+        with file_path.open("r") as handle:
             for line in handle:
-                specifier = parse_python_specifier(line)
+                specifier = python_version.parse_python_specifier(line)
                 if specifier:
-                    found_version = utils.FoundVersion(dot_venv, ".", specifier, line.strip())
-                    found_versions.append(found_version)
-    return found_versions
-
-
-def find_dot_python_version() -> list[utils.FoundVersion]:
-    """Look for python versions in .venv files."""
-    found_versions: list[utils.FoundVersion] = []
-    dot_python_version = utils.find_up(".python-version")
-    if dot_python_version is not None and dot_python_version.is_file():
-        logger.debug("Found .python-version")
-        with dot_python_version.open("r") as handle:
-            for line in handle:
-                specifier = parse_python_specifier(line)
-                if specifier:
-                    found_version = utils.FoundVersion(dot_python_version, ".", specifier, line.strip())
-                    found_versions.append(found_version)
-    return found_versions
-
-
-def find_runtime_txt_version() -> list[utils.FoundVersion]:
-    """Look for python versions in .venv files."""
-    found_versions: list[utils.FoundVersion] = []
-    runtime_txt_file = utils.find_up("runtime.txt")
-    if runtime_txt_file is not None and runtime_txt_file.is_file():
-        logger.debug("Found runtime.txt")
-        with runtime_txt_file.open("r") as handle:
-            for line in handle:
-                specifier = parse_python_specifier(line)
-                if specifier:
-                    found_version = utils.FoundVersion(runtime_txt_file, ".", specifier, line.strip())
-                    found_versions.append(found_version)
+                    found_version = utils.FoundVersion(file_path, ".", line.strip(), specifier)
+                    if found_version:
+                        found_versions.append(found_version)
     return found_versions
 
 
 def find_github_action_python_versions() -> list[utils.FoundVersion]:
-    """Look for python versions in .venv files."""
+    """Look for python versions in _github_action files."""
     found_versions: list[utils.FoundVersion] = []
-    dot_github = utils.find_up(".github")
+    dot_github = file_utils.find_up(".github")
     python_versions = []
     if dot_github is not None and dot_github.exists():
         for workflow_yaml in dot_github.glob("workflows/*.yml"):
@@ -136,10 +109,10 @@ def find_github_action_python_versions() -> list[utils.FoundVersion]:
                     python_versions.extend(utils.rglob_var(document, "python-version"))
                     python_versions.extend(utils.rglob_var(document, "PYTHON_VERSION"))
                     for python_version in python_versions:
-                        specifier = parse_python_specifier(python_version)
+                        specifier = python_version.parse_python_specifier(python_version)
                         if specifier:
                             found_version = utils.FoundVersion(
-                                workflow_yaml, f"Document {index}", specifier, python_version
+                                workflow_yaml, f"Document {index}", python_version, specifier
                             )
                             found_versions.append(found_version)
     return found_versions
@@ -148,7 +121,7 @@ def find_github_action_python_versions() -> list[utils.FoundVersion]:
 def find_dockerfile_versions() -> list[utils.FoundVersion]:
     """Look for python versions in Dockerfiles."""
     found_versions: list[utils.FoundVersion] = []
-    dot_git = utils.find_up(".git")
+    dot_git = file_utils.find_up(".git")
     if dot_git is not None and dot_git.is_dir():
         dockerfiles = utils.find_dockerfiles(dot_git.parent)
     else:
@@ -160,16 +133,16 @@ def find_dockerfile_versions() -> list[utils.FoundVersion]:
                 for line in handle:
                     matches = re.match(r"FROM.*(python[.0-9]+)", line.strip())
                     if matches:
-                        specifier = parse_python_specifier(matches.group(1))
+                        specifier = python_version.parse_python_specifier(matches.group(1))
                         if specifier:
-                            found_version = utils.FoundVersion(dockerfile, "FROM", specifier, line.strip())
+                            found_version = utils.FoundVersion(dockerfile, "FROM", line.strip(), specifier)
                             found_versions.append(found_version)
                             continue
                     matches = re.match(r"FROM.*python[^:]*:([.0-9]+)", line.strip())
                     if matches:
-                        specifier = parse_python_specifier(matches.group(1))
+                        specifier = python_version.parse_python_specifier(matches.group(1))
                         if specifier:
-                            found_version = utils.FoundVersion(dockerfile, "FROM", specifier, line.strip())
+                            found_version = utils.FoundVersion(dockerfile, "FROM", line.strip(), specifier)
                             found_versions.append(found_version)
                             continue
     return found_versions
@@ -177,8 +150,8 @@ def find_dockerfile_versions() -> list[utils.FoundVersion]:
 
 def find_tox_versions() -> list[utils.FoundVersion]:
     """Look for tox versions in tox.ini files."""
-    pythons: list[PythonVersion] = []
-    tox_ini_file = utils.find_up("tox.ini")
+    pythons: list[python_version.PythonVersion] = []
+    tox_ini_file = file_utils.find_up("tox.ini")
     if tox_ini_file is not None and tox_ini_file.is_file():
         logger.debug("Found tox.ini")
         cfg = ConfigParser()
@@ -191,17 +164,17 @@ def find_tox_versions() -> list[utils.FoundVersion]:
                 major = matches.group("major")
                 minor = matches.group("minor")
                 version = f"{major}.{minor}"
-                python_version = PythonVersion.from_version(version)
-                if python_version:
-                    pythons.append(python_version)
+                maybe_python_version = python_version.PythonVersion.from_version(version)
+                if maybe_python_version:
+                    pythons.append(maybe_python_version)
     else:
         return []
     if not pythons:
         return []
     pythons.sort(key=lambda p: p.class_major)
 
-    python_ranges: list[list[PythonVersion]] = []
-    python_range: list[PythonVersion] = []
+    python_ranges: list[list[python_version.PythonVersion]] = []
+    python_range: list[python_version.PythonVersion] = []
     last_python_version = None
     for python in pythons:
         if last_python_version is None or python.class_major != last_python_version.class_major + 1:
@@ -210,82 +183,105 @@ def find_tox_versions() -> list[utils.FoundVersion]:
         else:
             python_range.append(python)
         last_python_version = python
-    found_versions = []
+    return extract_found_version_from_python_ranges(python_ranges, tox_ini_file, envlist, "tox.ini")
+
+
+def extract_found_version_from_python_ranges(
+    python_ranges: list[list[python_version.PythonVersion]], file_path: pathlib.Path, envlist: str, config_name: str
+) -> list[utils.FoundVersion]:
+    """Compare desired python versions with available environments."""
+    found_versions: list[utils.FoundVersion] = []
+    if not python_ranges:
+        return found_versions
     for python_range in python_ranges:
-        if len(python_range) == 1:
-            python = python_range[0]
-            specifier = parse_python_specifier(python.specifier)
-            if specifier:
-                found_version = utils.FoundVersion(tox_ini_file, ".tox.envlist", specifier, python.specifier)
-                found_versions.append(found_version)
-        else:
-            min_python = python_range[0]
-            max_python = python_range[-1]
-            next_python = max_python.next_version
-            if next_python is not None:
-                specifier_string = f">={min_python.major_minor_patch},<={next_python.major_minor_patch}"
-            else:
-                specifier_string = f">={min_python.major_minor_patch},<={max_python.major_minor_patch}"
-            specifier = SpecifierSet(specifier_string)
-            found_version = utils.FoundVersion(tox_ini_file, ".tox.envlist", specifier, envlist)
-            found_versions.append(found_version)
+        found_versions.extend(extract_found_version_from_python_range(python_range, file_path, envlist, config_name))
     return found_versions
 
 
 def find_pyvenv_cfg() -> list[utils.FoundVersion]:
     """Look for tox versions in tox.ini files."""
-    pythons: list[PythonVersion] = []
-    pyvenv_cfg = utils.find_up("pyvenv.cfg")
+    pyvenv_cfg = file_utils.find_up("pyvenv.cfg")
     if pyvenv_cfg is not None and pyvenv_cfg.is_file():
         logger.debug("Found pyvenv.cfg")
-        cfg = ConfigParser()
-        cfg.read(pyvenv_cfg)
-        tox_section = cfg["tox"]
-        envlist = tox_section["envlist"]
-        for env in envlist.split("\n"):
-            matches = re.match(r"py(?P<major>[0-9])(?P<minor>[0-9]+)", env)
-            if matches:
-                major = matches.group("major")
-                minor = matches.group("minor")
-                version = f"{major}.{minor}"
-                python_version = PythonVersion.from_version(version)
-                if python_version:
-                    pythons.append(python_version)
-    else:
-        return []
-    if not pythons:
-        return []
-    pythons.sort(key=lambda p: p.class_major)
-
-    python_ranges: list[list[PythonVersion]] = []
-    python_range: list[PythonVersion] = []
-    last_python_version = None
-    for python in pythons:
-        if last_python_version is None or python.class_major != last_python_version.class_major + 1:
-            python_range = [python]
-            python_ranges.append(python_range)
-        else:
-            python_range.append(python)
-        last_python_version = python
-    found_versions = []
-    for python_range in python_ranges:
-        if len(python_range) == 1:
-            python = python_range[0]
-            specifier = parse_python_specifier(python.specifier)
+        cfg = read_pyvenv_cfg(pyvenv_cfg)
+        version = cfg.get("version")
+        if version is not None:
+            specifier = python_version.parse_python_specifier(version)
             if specifier:
-                found_version = utils.FoundVersion(pyvenv_cfg, ".tox.envlist", specifier, python.specifier)
-                found_versions.append(found_version)
-        else:
-            min_python = python_range[0]
-            max_python = python_range[-1]
-            next_python = max_python.next_version
-            if next_python is not None:
-                specifier_string = f">={min_python.major_minor_patch},<={next_python.major_minor_patch}"
-            else:
-                specifier_string = f">={min_python.major_minor_patch},<={max_python.major_minor_patch}"
-            specifier = SpecifierSet(specifier_string)
-            found_version = utils.FoundVersion(pyvenv_cfg, ".tox.envlist", specifier, envlist)
+                return [utils.FoundVersion(pyvenv_cfg, "version", version, specifier)]
+    return []
+
+
+def read_pyvenv_cfg(path: pathlib.Path) -> dict[str, str]:
+    """Read pyvenv.cfg file into a dictionary."""
+    if path is None or not path.is_file():
+        return {}
+    result = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped_line = line.strip()
+        if not stripped_line or stripped_line.startswith("#") or "=" not in stripped_line:
+            continue
+        key, value = stripped_line.split("=", 1)
+        result[key.strip()] = value.strip()
+    return result
+
+
+def extract_found_version_from_python_range(
+    python_range: list[python_version.PythonVersion], file_path: pathlib.Path, config_name: str, envlist: str
+) -> list[utils.FoundVersion]:
+    """Compare desired python versions with available environments."""
+    found_versions: list[utils.FoundVersion] = []
+    if not python_range:
+        return found_versions
+    if len(python_range) == 1:
+        python = python_range[0]
+        specifier = python_version.parse_python_specifier(python.specifier)
+        if specifier:
+            found_version = utils.FoundVersion(file_path, config_name, python.specifier, specifier)
             found_versions.append(found_version)
+    else:
+        min_python = python_range[0]
+        max_python = python_range[-1]
+        next_python = max_python.next_version
+        if next_python is not None:
+            specifier_string = f">={min_python.major_minor_patch},<={next_python.major_minor_patch}"
+        else:
+            specifier_string = f">={min_python.major_minor_patch},<={max_python.major_minor_patch}"
+        specifier = SpecifierSet(specifier_string)
+        found_version = utils.FoundVersion(file_path, config_name, envlist, specifier)
+        found_versions.append(found_version)
+    return found_versions
+
+
+jenkins_line_matchers = [r"python-?(?P<version>[.0-9]+)"]
+
+
+def extract_python_specifier_from_jenkins_line(line: str) -> tuple[str | None, SpecifierSet | None]:
+    """Get a java version from a dockerfile line.
+
+    >>> extract_python_specifier_from_jenkins_line("/opt/python3.8-sb/bin/python3.8")
+    ('3.8', <SpecifierSet('~=3.8.0')>)
+    """
+    line = line.strip()
+    for matcher in jenkins_line_matchers:
+        matches = re.search(matcher, line)
+        if matches:
+            version = matches.group("version")
+            return version, python_version.parse_python_specifier(version)
+    return None, None
+
+
+def find_jenkins_file_versions() -> list[utils.FoundVersion]:
+    """Look for python versions in Jenkinsfiles."""
+    found_versions: list[utils.FoundVersion] = []
+    for jenkins_file in file_utils.rglob_from_dir_containing(".git", "Jenkinsfile*"):
+        logger.debug("Found Jenkinsfile %s", jenkins_file.file_path)
+        for line in jenkins_file.handle:
+            original_string, specifier = extract_python_specifier_from_jenkins_line(line)
+            if original_string is not None and specifier is not None:
+                found_version = utils.FoundVersion(jenkins_file.file_path, original_string, line.strip(), specifier)
+                found_versions.append(found_version)
+                continue
     return found_versions
 
 
@@ -313,13 +309,15 @@ class Main(cmd.Main):
         super().main()
 
         found_versions: list[utils.FoundVersion] = find_pyproject_versions()
-        found_versions.extend(find_dot_venv_versions())
+        found_versions.extend(find_up_file_versions(".python-version"))
+        found_versions.extend(find_up_file_versions("runtime.txt"))
+        found_versions.extend(find_up_file_versions(".venv"))
+        found_versions.extend(find_up_file_versions("setup.py"))
         found_versions.extend(find_dockerfile_versions())
-        found_versions.extend(find_dot_python_version())
-        found_versions.extend(find_runtime_txt_version())
         found_versions.extend(find_github_action_python_versions())
         found_versions.extend(find_tox_versions())
         found_versions.extend(find_pyvenv_cfg())
+        found_versions.extend(find_jenkins_file_versions())
 
         possible_versions = extract_versions(found_versions)
         iterable = possible_versions
