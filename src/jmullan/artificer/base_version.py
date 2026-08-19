@@ -6,13 +6,7 @@ import pathlib
 from collections import defaultdict
 from collections.abc import Iterable, Iterator
 
-from packaging.specifiers import (
-    InvalidSpecifier,
-    Specifier,
-    SpecifierSet,
-    UnparsedVersionVar,
-    _coerce_version,
-)
+from packaging.specifiers import InvalidSpecifier, Specifier, SpecifierSet, UnparsedVersionVar, UnparsedVersion
 from packaging.version import InvalidVersion, Version
 
 from jmullan.artificer import utils
@@ -31,6 +25,15 @@ def get_version(version: str | None) -> Version | None:
     except InvalidVersion:
         pass
     return None
+
+
+def _coerce_version(version: UnparsedVersion) -> Version | None:
+    if not isinstance(version, Version):
+        try:
+            version = Version(version)
+        except InvalidVersion:
+            return None
+    return version
 
 
 def version_in_specifier(version: str, specifier: SpecifierSet) -> bool:
