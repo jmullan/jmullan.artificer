@@ -42,6 +42,6 @@ repos:
   hooks:
   - id: mypy
     name: mypy-src
-    files: ^src
-    args: ["--config-file", "pyproject.toml"]
+    pass_filenames: false
+    args: ["--config-file", "pyproject.toml", "src"]
     additional_dependencies: ["types-requests", "types-PyYAML"]

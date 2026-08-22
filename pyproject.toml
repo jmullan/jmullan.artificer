@@ -104,11 +104,12 @@ harbor-registry = "jmullan.artificer.harbor_registry:main"
 chomp-python-version = "jmullan.artificer.chomp_python_version:main"
 guess-project-python = "jmullan.artificer.guess_project_python:main"
 guess-project-java = "jmullan.artificer.guess_project_java:main"
+find-up = "jmullan.artificer.find_up:main"
 
 [tool.mypy]
 namespace_packages = true
 explicit_package_bases = true
-mypy_path = "src:tests"
+mypy_path = "src"
 python_version = "3.13"
 ignore_missing_imports = true
 enable_error_code = [
@@ -174,6 +175,9 @@ internal = ["jmullan"]
 docstring-code-format = true
 docstring-code-line-length = 80
 quote-style = "double"
+
+[tool.ruff.lint.pylint]
+max-returns = 10
 
 [tool.pytest.ini_options]
 minversion = "6.0"

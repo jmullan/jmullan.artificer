@@ -155,8 +155,8 @@ gradle_support = {
 def find_gradle_versions(*, strict: bool = False) -> list[utils.FoundVersion]:
     """Look for versions in Gradle files."""
     logger.debug("Finding gradle versions...")
-    found_versions: list[utils.FoundVersion] = []
     found_version: utils.FoundVersion | None
+    found_versions: list[utils.FoundVersion] = []
     for build_gradle in file_utils.rglob_from_dir_containing(".git", "build.gradle"):
         logger.debug("Found build.gradle %s", build_gradle.file_path)
         for line in build_gradle.handle:
@@ -292,9 +292,9 @@ def find_jenkins_file_versions(*, strict: bool = False) -> list[utils.FoundVersi
     for jenkins_file in file_utils.rglob_from_dir_containing(".git", "Jenkinsfile*"):
         logger.debug("Found Jenkinsfile %s", jenkins_file.file_path)
         for line in jenkins_file.handle:
-            original_string, specifier = extract_java_specifier_from_jenkins_line(line, strict=strict)
-            if original_string is not None and specifier is not None:
-                found_version = utils.FoundVersion(jenkins_file.file_path, original_string, line.strip(), specifier)
+            specifier = extract_java_specifier_from_jenkins_line(line, strict=strict)
+            if specifier is not None:
+                found_version = utils.FoundVersion(jenkins_file.file_path, "", line.strip(), specifier)
                 found_versions.append(found_version)
                 continue
     return found_versions

@@ -270,7 +270,7 @@ def read_includes_from_include_line(line: str) -> list[str]:
     return includes
 
 
-def force_a_list(value: typing.Any) -> list[typing.Any]:  # noqa: PLR0911
+def force_a_list(value: typing.Any) -> list[typing.Any]:
     """Change practically any value into a list."""
     match value:
         case list(x):

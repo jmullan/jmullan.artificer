@@ -11,7 +11,7 @@ import typing
 from packaging.specifiers import InvalidSpecifier, Specifier, SpecifierSet
 from packaging.version import Version
 
-from jmullan.artificer import base_version, utils
+from jmullan.artificer import utils, versions
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class PythonVersion(enum.Enum):
     def major_minor_patch(self) -> str:
         """Get a three part version string."""
         parts = self.version_name.split(".")
-        while len(parts) < base_version.MAJOR_MINOR_POINT_SECTION_COUNT:
+        while len(parts) < versions.MAJOR_MINOR_POINT_SECTION_COUNT:
             parts.append("0")
         return ".".join(parts)
 
@@ -88,7 +88,7 @@ class PythonBuilds:
         """Find python versions in the system or the spec."""
         version_tuple = sys.version_info[:3]
         version_str = f"{version_tuple[0]}.{version_tuple[1]}.{version_tuple[2]}"
-        version = base_version.get_version(version_str)
+        version = versions.get_version(version_str)
         if version is not None:
             cls.possible_versions.add(version)
             cls.likely_versions.add(version)
@@ -99,10 +99,10 @@ class PythonBuilds:
             if path.exists():
                 path = pathlib.Path.expanduser(path / "plugins/python-build/share/python-build/")
                 if path.exists():
-                    maybe_versions = [base_version.get_version(f.name) for f in path.iterdir() if f.is_file()]
-                    versions = [v for v in maybe_versions if v is not None]
-                    if versions:
-                        cls.possible_versions.update(versions)
+                    maybe_versions = [versions.get_version(f.name) for f in path.iterdir() if f.is_file()]
+                    found_versions = [v for v in maybe_versions if v is not None]
+                    if found_versions:
+                        cls.possible_versions.update(found_versions)
         roots = [os.environ.get("PYENV_ROOT"), "~/.pyenv", "/usr/share/pyenv"]
         pyenv_roots = {x for x in roots if x is not None}
         for root in pyenv_roots:
@@ -114,13 +114,13 @@ class PythonBuilds:
                     for version_dir in version_dirs:
                         executable = version_dir / "bin/python"
                         if executable.is_file():
-                            version = base_version.get_version(version_dir.name)
+                            version = versions.get_version(version_dir.name)
                             if version is not None:
                                 cls.possible_versions.add(version)
                                 cls.likely_versions.add(version)
 
 
-def parse_python_specifier(specifier: str | list[str | None] | None) -> SpecifierSet | None:  # noqa: PLR0911 C901
+def parse_python_specifier(specifier: str | list[str | None] | None) -> SpecifierSet | None:  # noqa: C901
     """Parse a specifier or specifiers into a SpecifierSet.
 
     >>> parse_python_specifier(">=2.3")
@@ -154,10 +154,9 @@ def parse_python_specifier(specifier: str | list[str | None] | None) -> Specifie
         return None
     if isinstance(specifier, list):
         specifiers = [s for s in [parse_python_specifier(v) for v in specifier] if s is not None]
-        if specifiers is not None:
-            if len(specifiers) == 1:
-                return specifiers[0]
-            return base_version.SpecifierSetOr(specifiers)
+        if len(specifiers) == 1:
+            return SpecifierSet(specifiers[0])
+        return versions.SpecifierSetOr(specifiers)
     specifier = specifier.strip()
     matches = re.search(r"Programming Language :: Python :: ([.0-9]+)", specifier)
     if matches:
@@ -213,15 +212,15 @@ def get_matching_python_versions(restriction: str | Specifier | SpecifierSet, ba
             specifier = SpecifierSet(f"=={restriction}")
     else:
         specifier = restriction
-    versions = []
+    matching_versions = []
     for version in sorted(PythonBuilds.likely_versions, reverse=backwards):
         if version in specifier:
-            versions.append(f"{version}")  # noqa: PERF401
+            matching_versions.append(f"{version}")  # noqa: PERF401
     for version in sorted(PythonBuilds.possible_versions, reverse=backwards):
         if version in specifier:
-            versions.append(f"{version}")  # noqa: PERF401
+            matching_versions.append(f"{version}")  # noqa: PERF401
 
-    return versions
+    return matching_versions
 
 
 def get_matching_python_version(restriction: str, pick: str | None = None) -> str | None:

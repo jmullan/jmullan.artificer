@@ -8,6 +8,7 @@ import re
 import tomllib
 import typing
 from collections import defaultdict
+from collections.abc import Generator
 
 import yaml
 from packaging.specifiers import SpecifierSet
@@ -100,6 +101,106 @@ def deep_get(data: typing.Any, variable: str) -> typing.Any:
                 logger.debug("%s not in %s at %s", variable, data, consumed)
                 return None
     return remaining
+
+
+def find_up(filename: str | pathlib.Path, in_dir: pathlib.Path | None = None) -> pathlib.Path | None:
+    """Look for a file in a parent directory."""
+    for path in find_ups(filename, in_dir):
+        return path
+    return None
+
+
+def find_ups(filename: str | pathlib.Path, in_dir: pathlib.Path | None = None) -> Generator[pathlib.Path, typing.Any]:
+    """Look for a file in parent directories."""
+    if in_dir is None:
+        in_dir = pathlib.Path().cwd()
+    test_path = in_dir / filename
+    if test_path.exists():
+        yield test_path
+    for ancestor in in_dir.parents:
+        test_path = ancestor / filename
+        if test_path.exists():
+            yield test_path
+    return None
+
+
+class ResolvedPaths:
+    """Precalculated paths for resolving short paths."""
+
+    resolved: dict[str, pathlib.Path]
+    reversed: dict[pathlib.Path, str]
+
+    def __init__(self):
+        self.resolved = {".": pathlib.Path().cwd()}
+        self.reversed = {pathlib.Path().cwd(): "."}
+
+    def add(self, in_dir: pathlib.Path) -> None:
+        """Resolve and store a path relative to its shortest textual path."""
+        expanded = in_dir
+        if "~" in str(in_dir):
+            expanded = in_dir.expanduser()
+        resolved = expanded.resolve()
+        text_path = str(in_dir)
+        self.resolved[text_path] = resolved
+        if resolved not in self.reversed or len(text_path) < len(self.reversed[resolved]):
+            self.reversed[resolved] = text_path
+
+    def resolve(self, in_dir: pathlib.Path) -> pathlib.Path:
+        """Find the path with the shortest textual path for a path."""
+        text_path = str(in_dir)
+        if text_path not in self.resolved:
+            self.add(in_dir)
+        return self.resolved[text_path]
+
+    def shortest(self, in_dir: pathlib.Path) -> str:
+        """Find the shortest textual path for a path."""
+        resolved = self.resolve(in_dir)
+        return self.reversed[resolved]
+
+
+def shortest_path_to(resolved_paths: ResolvedPaths, path: pathlib.Path) -> str:
+    """Find the shortest text path relative to a set of paths."""
+    shortest_path = str(path)
+    for resolved, as_dir in resolved_paths.reversed.items():
+        if path.is_relative_to(resolved):
+            relative = path.relative_to(resolved)
+            if str(relative).startswith("/"):
+                candidate = str(path)
+            elif as_dir in (".", "./"):
+                candidate = str(relative)
+            else:
+                candidate = f"{as_dir}/{relative}"
+        else:
+            candidate = str(path)
+        if len(candidate) < len(shortest_path):
+            shortest_path = str(candidate)
+    return shortest_path
+
+
+def find_up_many(
+    in_dirs: typing.Iterable[pathlib.Path], filenames: typing.Iterable[pathlib.Path], *, absolute: bool = False
+) -> typing.Iterable[str]:
+    """Look in dirs for files."""
+    resolved_paths: ResolvedPaths = ResolvedPaths()
+    used_paths: set[pathlib.Path] = set()
+    seen_files: set[pathlib.Path] = set()
+    for in_dir in in_dirs:
+        resolved_paths.add(in_dir)
+
+    for in_dir in in_dirs:
+        resolved = resolved_paths.resolve(in_dir)
+
+        if resolved not in used_paths:
+            used_paths.add(resolved)
+            for filename in filenames:
+                for maybe_found in find_ups(filename, resolved):
+                    if maybe_found in seen_files:
+                        continue
+                    seen_files.add(maybe_found)
+                    if absolute:
+                        yield str(maybe_found.resolve())
+                    else:
+                        yield shortest_path_to(resolved_paths, maybe_found)
 
 
 def rglob_var(document: typing.Any, var_name: str) -> list[typing.Any]:

@@ -12,7 +12,7 @@ from packaging.specifiers import (
 )
 from packaging.version import Version
 
-from jmullan.artificer import base_version
+from jmullan.artificer import versions
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +87,7 @@ class JavaVersion(enum.Enum):
             return self._specifier
         canonical = self.aliases[0]
         parts = canonical.split(".")
-        while len(parts) < base_version.MAJOR_MINOR_POINT_SECTION_COUNT:
+        while len(parts) < versions.MAJOR_MINOR_POINT_SECTION_COUNT:
             parts.append("0")
         return "~=" + ".".join(parts)
 
@@ -110,35 +110,6 @@ class JavaVersion(enum.Enum):
         return None
 
 
-class SDKManVersion(Version):
-    """A version as told to SDK."""
-
-    def __init__(self, version: str) -> None:
-        super().__init__(version.replace("-", "+", 1))
-        self.version = version
-
-
-def get_matching_java_versions(restriction: str | Specifier | SpecifierSet) -> list[str]:
-    """Get a list of versions matching a restriction."""
-    if isinstance(restriction, str):
-        try:
-            specifier = SpecifierSet(restriction)
-        except InvalidSpecifier:
-            specifier = SpecifierSet(f"=={restriction}")
-    else:
-        specifier = restriction
-    versions = []
-    java_dir = pathlib.Path.home() / ".sdkman" / "candidates" / "java"
-    if java_dir.exists():
-        sdkman_versions = sorted(p.name for p in java_dir.iterdir() if p.is_dir() and p.name != "current")
-        versions = [version for version in sdkman_versions if SDKManVersion(version) in specifier]
-    for java_version in JavaVersion:
-        if java_version.canonical in specifier:
-            logger.debug("Found Java version: %s for %s", java_version, specifier)
-            versions.append(f"{java_version.canonical}")
-    return versions
-
-
 def specifier_set_contains_java_version(specifier: SpecifierSet | Specifier, java_version: str) -> bool:
     """Check if a specifier set contains a Java version."""
     if specifier is None or java_version is None:
@@ -148,7 +119,7 @@ def specifier_set_contains_java_version(specifier: SpecifierSet | Specifier, jav
     return pep_440_version in specifier
 
 
-def parse_java_specifier(specifier: str | list[str | None] | None, *, strict: bool = False) -> SpecifierSet | None:  # noqa: PLR0911 C901
+def parse_java_specifier(specifier: str | list[str | None] | None, *, strict: bool = False) -> SpecifierSet | None:  # noqa: C901
     """Parse a specifier or specifiers into a SpecifierSet.
 
     >>> parse_java_specifier("11.0-stretch-yy0.0.1", strict=True)
@@ -203,28 +174,11 @@ def parse_java_specifier(specifier: str | list[str | None] | None, *, strict: bo
     original_specifier = specifier
     if isinstance(specifier, list):
         specifiers = [parse_java_specifier(v) for v in specifier]
-        non_none = [s for s in specifiers if s is not None]
-        if len(non_none) == 1:
-            return SpecifierSet(non_none[0])
-        return base_version.SpecifierSetOr(non_none)
+        if len(specifiers) == 1:
+            return SpecifierSet(specifiers[0])
+        return versions.SpecifierSetOr(specifiers)
     specifier = specifier.strip()
     java_version_lower = specifier.lower().strip()
-
-    specifier_set = parse_jdk_u(java_version_lower, strict=strict)
-    if specifier_set is not None:
-        return specifier_set
-
-    specifier_set = parse_jdk_underscore_version(java_version_lower, strict=strict)
-    if specifier_set is not None:
-        return specifier_set
-    specifier_set = parse_jdk_dash_version(original_specifier, java_version_lower, strict=strict)
-    if specifier_set is not None:
-        return specifier_set
-
-    specifier_set = parse_dotted_version(original_specifier, specifier, strict=strict)
-    if specifier_set is not None:
-        return specifier_set
-
     matches = re.search(r"javaversion.version_(?P<version>[_0-9]+)$", java_version_lower)
     if matches:
         specifier = matches.group(1).replace("_", ".")
@@ -234,6 +188,22 @@ def parse_java_specifier(specifier: str | list[str | None] | None, *, strict: bo
     matches = re.match(r"java *([.0-9]+)$", java_version_lower)
     if matches:
         specifier = matches.group(1)
+
+    specifier_set = parse_jdk_u(java_version_lower, strict=strict)
+    if specifier_set is not None:
+        return specifier_set
+    specifier_set = parse_jdk_underscore_version(java_version_lower, strict=strict)
+    if specifier_set is not None:
+        return specifier_set
+
+    specifier_set = parse_jdk_dash_version(original_specifier, java_version_lower, strict=strict)
+    if specifier_set is not None:
+        return specifier_set
+
+    specifier_set = parse_dotted_version(original_specifier, java_version_lower, strict=strict)
+    if specifier_set is not None:
+        return specifier_set
+
     java_version = JavaVersion.from_version(specifier)
     if java_version is not None:
         return SpecifierSet(f"{java_version.specifier}")
@@ -282,12 +252,8 @@ def parse_jdk_underscore_version(java_version_lower: str, *, strict: bool = Fals
         if java_version is not None:
             if not strict:
                 return SpecifierSet(java_version.specifier)
-            new_parts = java_version.major_minor.split(".")
-            parts = [major, minor, point]
-            if update is not None:
-                parts.append(update)
-            while len(new_parts) < len(parts):
-                new_parts.append(parts[len(new_parts)])
+
+            new_parts = fill_parts(java_version, major, minor, point, None)
             # we use == here because the asked-for java version was 3 segments
             return SpecifierSet("==" + ".".join(new_parts))
         if not strict:
@@ -319,17 +285,12 @@ def parse_jdk_dash_version(
         if java_version is not None:
             if point is None or not strict:
                 return SpecifierSet(java_version.specifier)
-            new_parts = java_version.major_minor.split(".")
-            parts = [major, minor, point]
-            if build is not None:
-                parts.append(build)
-            while len(new_parts) < len(parts):
-                new_parts.append(parts[len(new_parts)])
+            new_parts = fill_parts(java_version, major, minor, point, build)
             # we use == here because the asked-for java version was 3 segments
-            specifier_set = base_version.maybe_specifier_set(original_specifier, "==" + ".".join(new_parts))
+            specifier_set = versions.maybe_specifier_set(original_specifier, "==" + ".".join(new_parts))
             if specifier_set is not None:
                 return specifier_set
-        specifier_set = base_version.maybe_specifier_set(original_specifier, f"=={major}.{minor}.{point}+{build}")
+        specifier_set = versions.maybe_specifier_set(original_specifier, f"=={major}.{minor}.{point}+{build}")
         if specifier_set is not None:
             return specifier_set
     return None
@@ -347,8 +308,8 @@ def parse_java_version_parts(
         return None
     if major is not None and minor is not None and point is not None and build is not None:
         if point == "0" and re.match(r"^[0-9]+$", build):
-            return base_version.maybe_specifier_set(original_specifier, f"=={major}.{minor}.{build}")
-        return base_version.maybe_specifier_set(original_specifier, f"=={major}.{minor}.{point}+{build}")
+            return versions.maybe_specifier_set(original_specifier, f"=={major}.{minor}.{build}")
+        return versions.maybe_specifier_set(original_specifier, f"=={major}.{minor}.{point}+{build}")
     if minor is None:
         java_version = JavaVersion.from_version(f"{major}")
         if java_version is not None:
@@ -359,15 +320,6 @@ def parse_java_version_parts(
         return None
     if point is None and build is None:
         return SpecifierSet(java_version.specifier)
-    new_parts = java_version.major_minor.split(".")
-    if build is None:
-        parts = [major, minor, point]
-    elif (point is None or point == "0") and (build is not None and re.match(r"^[0-9]+$", build)):
-        parts = [major, minor, build]
-    elif point is None:
-        parts = [major, minor, point]
-    else:
-        parts = [major, minor, point, build]
 
     if (point is None or point == "0") and (build is not None and re.match(r"^[0-9]+$", build)):
         return parse_java_version_parts(original_specifier, major, minor, build, None)
@@ -380,7 +332,7 @@ def parse_dotted_version(
 ) -> SpecifierSet | None:
     """See if the specifier can be parsed as a dotted version."""
     parts = specifier.split(".")
-    if len(parts) >= base_version.MAJOR_MINOR_POINT_SECTION_COUNT:
+    if len(parts) >= versions.MAJOR_MINOR_POINT_SECTION_COUNT:
         java_version = JavaVersion.from_version(".".join(parts[:1]))
         if java_version is not None:
             if not strict:
@@ -390,7 +342,61 @@ def parse_dotted_version(
             while len(new_parts) < len(parts):
                 new_parts.append(parts[len(new_parts)])
             # we use == here because the asked-for java version was 3 segments
-            specifier_set = base_version.maybe_specifier_set(original_specifier, "==" + ".".join(new_parts))
+            specifier_set = versions.maybe_specifier_set(original_specifier, "==" + ".".join(new_parts))
             if specifier_set is not None:
                 return specifier_set
     return None
+
+
+class SDKManVersion(Version):
+    """A version as told to SDK."""
+
+    def __init__(self, version: str) -> None:
+        super().__init__(version.replace("-", "+", 1))
+        self.version = version
+
+
+def get_matching_java_versions(restriction: str | Specifier | SpecifierSet) -> list[str]:
+    """Get a list of versions matching a restriction."""
+    if isinstance(restriction, str):
+        try:
+            specifier = SpecifierSet(restriction)
+        except InvalidSpecifier:
+            specifier = SpecifierSet(f"=={restriction}")
+    else:
+        specifier = restriction
+    matching_versions = []
+    sdkman_java_dir = pathlib.Path.home() / ".sdkman" / "candidates" / "java"
+    if sdkman_java_dir.exists():
+        sdkman_versions = sorted(p.name for p in sdkman_java_dir.iterdir() if p.is_dir() and p.name != "current")
+        filtered_versions = [v for v in sdkman_versions if SDKManVersion(v) in specifier]
+        matching_versions.extend(filtered_versions)
+
+    for java_version in JavaVersion:
+        if java_version.canonical in specifier:
+            logger.debug("Found Java version: %s for %s", java_version, specifier)
+            matching_versions.append(f"{java_version.canonical}")
+
+    return matching_versions
+
+
+def fill_parts(
+    java_version: JavaVersion, major: str | None, minor: str | None, point: str | None, build: str | None = None
+) -> list[str]:
+    """Build a list of version parts."""
+    new_parts = java_version.major_minor.split(".")
+
+    if build is None:
+        parts = [major, minor, point]
+    elif (point is None or point == "0") and (build is not None and re.match(r"^[0-9]+$", build)):
+        parts = [major, minor, build]
+    elif point is None:
+        parts = [major, minor, point]
+    else:
+        parts = [major, minor, point, build]
+    while len(new_parts) < len(parts):
+        part = parts[len(new_parts)]
+        if part is None:
+            break
+        new_parts.append(part)
+    return new_parts
