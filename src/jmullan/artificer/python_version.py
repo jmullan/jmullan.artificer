@@ -120,7 +120,7 @@ class PythonBuilds:
                                 cls.likely_versions.add(version)
 
 
-def parse_python_specifier(specifier: str | list[str | None] | None) -> SpecifierSet | None:  # noqa: C901
+def parse_python_specifier(specifier: str | list[str | None] | float | None) -> SpecifierSet | None:  # noqa: C901
     """Parse a specifier or specifiers into a SpecifierSet.
 
     >>> parse_python_specifier(">=2.3")
@@ -157,7 +157,8 @@ def parse_python_specifier(specifier: str | list[str | None] | None) -> Specifie
         if len(specifiers) == 1:
             return SpecifierSet(specifiers[0])
         return versions.SpecifierSetOr(specifiers)
-    specifier = specifier.strip()
+
+    specifier = f"{specifier}".strip()
     matches = re.search(r"Programming Language :: Python :: ([.0-9]+)", specifier)
     if matches:
         specifier = matches.group(1)

@@ -88,6 +88,46 @@ class SpecifierSetOr(SpecifierSet):
         """
         return "|".join(sorted(str(s) for s in self._specs))
 
+    def contains(self, item: UnparsedVersion, prereleases: bool | None = None, installed: bool | None = None) -> bool:  # noqa: FBT001
+        """Return Whether the item is contained in this SpecifierSet.
+
+        :param item:
+            The item to check for, which can be a version string or a
+            :class:`Version` instance.
+        :param prereleases:
+            Whether to match prereleases with this SpecifierSet. If set to
+            ``None`` (the default), it will follow the recommendation from :pep:`440`
+            and match prereleases, as there are no other versions.
+        :param installed:
+            Whether the item is installed. If set to ``True``, it will
+            accept prerelease versions even if the specifier does not allow them.
+
+        >>> SpecifierSet(">=1.0.0,!=1.0.1").contains("1.2.3")
+        True
+        >>> SpecifierSet(">=1.0.0,!=1.0.1").contains(Version("1.2.3"))
+        True
+        >>> SpecifierSet(">=1.0.0,!=1.0.1").contains("1.0.1")
+        False
+        >>> SpecifierSet(">=1.0.0,!=1.0.1").contains("1.3.0a1")
+        True
+        >>> SpecifierSet(">=1.0.0,!=1.0.1", prereleases=False).contains("1.3.0a1")
+        False
+        >>> SpecifierSet(">=1.0.0,!=1.0.1").contains("1.3.0a1", prereleases=True)
+        True
+        """
+        version = get_version(item)
+
+        if version is not None and installed and version.is_prerelease:
+            prereleases = True
+
+        # When item is a string and === is involved, keep it as-is
+        # so the comparison isn't done against the normalized form.
+        if version is None or (self._has_arbitrary and not isinstance(item, Version)):
+            check_item = item
+        else:
+            check_item = version
+        return bool(list(self.filter([check_item], prereleases=prereleases)))
+
     def filter(
         self,
         iterable: Iterable[UnparsedVersionVar],

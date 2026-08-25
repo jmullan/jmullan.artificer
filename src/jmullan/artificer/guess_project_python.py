@@ -99,20 +99,20 @@ def find_github_action_python_versions() -> list[utils.FoundVersion]:
     """Look for python versions in _github_action files."""
     found_versions: list[utils.FoundVersion] = []
     dot_github = file_utils.find_up(".github")
-    python_versions = []
+    python_version_strings = []
     if dot_github is not None and dot_github.exists():
         for workflow_yaml in dot_github.glob("workflows/*.yml"):
             with workflow_yaml.open("rb") as f:
                 documents = yaml.safe_load_all(f)
                 for index, document in enumerate(documents):
-                    python_versions.extend(utils.rglob_var(document, "python_version"))
-                    python_versions.extend(utils.rglob_var(document, "python-version"))
-                    python_versions.extend(utils.rglob_var(document, "PYTHON_VERSION"))
-                    for python_version in python_versions:
-                        specifier = python_version.parse_python_specifier(python_version)
+                    python_version_strings.extend(utils.rglob_var(document, "python_version"))
+                    python_version_strings.extend(utils.rglob_var(document, "python-version"))
+                    python_version_strings.extend(utils.rglob_var(document, "PYTHON_VERSION"))
+                    for python_version_string in python_version_strings:
+                        specifier = python_version.parse_python_specifier(python_version_string)
                         if specifier:
                             found_version = utils.FoundVersion(
-                                workflow_yaml, f"Document {index}", python_version, specifier
+                                workflow_yaml, f"Document {index}", python_version_string, specifier
                             )
                             found_versions.append(found_version)
     return found_versions
